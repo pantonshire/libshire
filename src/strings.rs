@@ -21,6 +21,8 @@ use sqlx::{
 
 use buf::{StackString, HeapString};
 
+// TODO: inlining
+
 /// A non-growable string where strings 22 bytes or shorter are stored on the stack and longer
 /// strings are stored on the heap.
 /// 
@@ -45,6 +47,8 @@ pub struct ShString<const N: usize>(Repr<N>);
 impl<const N: usize> ShString<N> {
     /// Creates a new `ShString` from the given string slice, putting it on the stack if possible
     /// or creating a new heap allocation otherwise.
+    #[inline]
+    #[must_use]
     pub fn new_from_str(s: &str) -> Self {
         match StackString::from_str(s) {
             Some(stack_buf) => Self(Repr::Stack(stack_buf)),
@@ -54,6 +58,8 @@ impl<const N: usize> ShString<N> {
 
     /// Creates a new `ShString` from the given owned `String`, moving the string data onto the
     /// stack if possible or reusing the `String`'s heap allocation otherwise.
+    #[inline]
+    #[must_use]
     pub fn new_from_string(s: String) -> Self {
         match StackString::from_str(&s) {
             Some(stack_buf) => Self(Repr::Stack(stack_buf)),
@@ -62,6 +68,8 @@ impl<const N: usize> ShString<N> {
     }
 
     /// Creates a new `ShString` from the given `Cow<str>`.
+    #[inline]
+    #[must_use]
     pub fn new_from_cow_str(s: Cow<str>) -> Self {
         match s {
             Cow::Borrowed(s) => Self::new_from_str(s),
@@ -70,6 +78,8 @@ impl<const N: usize> ShString<N> {
     }
 
     /// Returns a string slice for the underlying string data.
+    #[inline]
+    #[must_use]
     pub fn as_str(&self) -> &str {
         match self {
             Self(Repr::Stack(buf)) => buf.as_str(),
@@ -78,6 +88,8 @@ impl<const N: usize> ShString<N> {
     }
 
     /// Returns a mutable string slice for the underlying string data.
+    #[inline]
+    #[must_use]
     pub fn as_str_mut(&mut self) -> &mut str {
         match self {
             Self(Repr::Stack(buf)) => buf.as_str_mut(),
@@ -86,6 +98,8 @@ impl<const N: usize> ShString<N> {
     }
 
     /// Consumes the `ShString` and converts it to a heap-allocated `String`.
+    #[inline]
+    #[must_use]
     pub fn into_string(self) -> String {
         match self {
             Self(Repr::Stack(buf)) => buf.into_string(),
@@ -100,6 +114,8 @@ impl<const N: usize> ShString<N> {
     /// let s = ShString::<22>::new_from_str("こんにちは");
     /// assert_eq!(s.len(), 15);
     /// ```
+    #[inline]
+    #[must_use]
     pub fn len(&self) -> usize {
         match self {
             Self(Repr::Stack(buf)) => buf.len(),
@@ -117,6 +133,8 @@ impl<const N: usize> ShString<N> {
     /// let s2 = ShString::<22>::new_from_str("Hello");
     /// assert!(!s2.is_empty());
     /// ```
+    #[inline]
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         match self {
             Self(Repr::Stack(buf)) => buf.is_empty(),
@@ -134,6 +152,8 @@ impl<const N: usize> ShString<N> {
     /// let s2 = ShString::<22>::new_from_str("This string is 23 bytes");
     /// assert!(s2.heap_allocated());
     /// ```
+    #[inline]
+    #[must_use]
     pub fn heap_allocated(&self) -> bool {
         match self {
             Self(Repr::Stack(_)) => false,
@@ -145,60 +165,70 @@ impl<const N: usize> ShString<N> {
 impl<const N: usize> ops::Deref for ShString<N> {
     type Target = str;
 
+    #[inline]
     fn deref(&self) -> &Self::Target {
         self.as_str()
     }
 }
 
 impl<const N: usize> ops::DerefMut for ShString<N> {
+    #[inline]
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.as_str_mut()
     }
 }
 
 impl<const N: usize> AsRef<str> for ShString<N> {
+    #[inline]
     fn as_ref(&self) -> &str {
         self
     }
 }
 
 impl<const N: usize> borrow::Borrow<str> for ShString<N> {
+    #[inline]
     fn borrow(&self) -> &str {
         self
     }
 }
 
 impl<const N: usize> borrow::BorrowMut<str> for ShString<N> {
+    #[inline]
     fn borrow_mut(&mut self) -> &mut str {
         self
     }
 }
 
 impl<'a, const N: usize> From<&'a str> for ShString<N> {
+    #[inline]
     fn from(s: &'a str) -> Self {
         Self::new_from_str(s)
     }
 }
 
 impl<const N: usize> From<String> for ShString<N> {
+    #[inline]
     fn from(s: String) -> Self {
         Self::new_from_string(s)
     }
 }
 
 impl<'a, const N: usize> From<Cow<'a, str>> for ShString<N> {
+    #[inline]
     fn from(s: Cow<'a, str>) -> Self {
         Self::new_from_cow_str(s)
     }
 }
 
 impl<const N: usize> From<ShString<N>> for String {
+    #[inline]
     fn from(s: ShString<N>) -> Self {
         s.into_string()
     }
 }
 
 impl<const N: usize, const M: usize> PartialEq<ShString<M>> for ShString<N> {
+    #[inline]
     fn eq(&self, other: &ShString<M>) -> bool {
         **self == **other
     }
@@ -207,18 +237,21 @@ impl<const N: usize, const M: usize> PartialEq<ShString<M>> for ShString<N> {
 impl<const N: usize> Eq for ShString<N> {}
 
 impl<const N: usize, const M: usize> PartialOrd<ShString<M>> for ShString<N> {
+    #[inline]
     fn partial_cmp(&self, other: &ShString<M>) -> Option<Ordering> {
         (**self).partial_cmp(&**other)
     }
 }
 
 impl<const N: usize> Ord for ShString<N> {
+    #[inline]
     fn cmp(&self, other: &Self) -> Ordering {
         (**self).cmp(&**other)
     }
 }
 
 impl<const N: usize> Hash for ShString<N> {
+    #[inline]
     fn hash<H: Hasher>(&self, state: &mut H) {
         (**self).hash(state);
     }
@@ -227,18 +260,21 @@ impl<const N: usize> Hash for ShString<N> {
 impl<const N: usize> FromStr for ShString<N> {
     type Err = Infallible;
 
+    #[inline]
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Ok(Self::new_from_str(s))
     }
 }
 
 impl<const N: usize> fmt::Debug for ShString<N> {
+    #[inline]
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         fmt::Debug::fmt(&**self, f)
     }
 }
 
 impl<const N: usize> fmt::Display for ShString<N> {
+    #[inline]
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         fmt::Display::fmt(&**self, f)
     }
