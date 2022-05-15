@@ -89,6 +89,12 @@ impl<const N: usize> ShString<N> {
     }
 
     /// Returns the length of the string in bytes.
+    /// 
+    /// ```
+    /// # use libshire::strings::ShString;
+    /// let s = ShString::<22>::new_from_str("こんにちは");
+    /// assert_eq!(s.len(), 15)
+    /// ```
     pub fn len(&self) -> usize {
         match self {
             Self(Repr::Stack(buf)) => buf.len(),
@@ -97,6 +103,15 @@ impl<const N: usize> ShString<N> {
     }
 
     /// Returns `true` if the string has length 0.
+    /// 
+    /// ```
+    /// # use libshire::strings::ShString;
+    /// let s1 = ShString::<22>::new_from_str("");
+    /// assert!(s1.is_empty());
+    /// 
+    /// let s2 = ShString::<22>::new_from_str("Hello");
+    /// assert!(!s2.is_empty());
+    /// ```
     pub fn is_empty(&self) -> bool {
         match self {
             Self(Repr::Stack(buf)) => buf.is_empty(),
@@ -105,6 +120,15 @@ impl<const N: usize> ShString<N> {
     }
 
     /// Returns `true` if the string data is stored on the heap, and `false` otherwise.
+    /// 
+    /// ```
+    /// # use libshire::strings::ShString;
+    /// let s1 = ShString::<22>::new_from_str("This string's 22 bytes");
+    /// assert!(!s1.heap_allocated());
+    /// 
+    /// let s2 = ShString::<22>::new_from_str("This string is 23 bytes");
+    /// assert!(s2.heap_allocated());
+    /// ```
     pub fn heap_allocated(&self) -> bool {
         match self {
             Self(Repr::Stack(_)) => false,
@@ -373,5 +397,77 @@ mod buf {
         pub(super) fn is_empty(&self) -> bool {
             self.buf.is_empty()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::borrow::Cow;
+
+    use super::{ShString, ShString22};
+
+    #[test]
+    fn test_new() {
+        let test_strings = [
+            "",
+            "Hello",
+            "Somethingfortheweekend",
+            "Dichlorodifluoromethane",
+            "こんにちは",
+            "❤️🧡💛💚💙💜"
+        ];
+
+        for s in test_strings {
+            let buf = s.to_owned();
+            let borrowed = Cow::Borrowed(s);
+            let owned = Cow::<'static, str>::Owned(buf.clone());
+
+            assert_eq!(ShString22::new_from_str(s).as_str(), s);
+            assert_eq!(ShString22::new_from_string(buf).as_str(), s);
+            assert_eq!(ShString22::new_from_cow_str(borrowed).as_str(), s);
+            assert_eq!(ShString22::new_from_cow_str(owned).as_str(), s);
+        }
+    }
+
+    #[test]
+    fn test_as_str_mut() {
+        let mut s1 = ShString22::new_from_str("hello");
+        s1.as_str_mut().make_ascii_uppercase();
+        assert_eq!(s1.as_str(), "HELLO");
+
+        let mut s2 = ShString22::new_from_str("the quick brown fox jumps over the lazy dog");
+        s2.as_str_mut().make_ascii_uppercase();
+        assert_eq!(s2.as_str(), "THE QUICK BROWN FOX JUMPS OVER THE LAZY DOG");
+    }
+
+    #[test]
+    fn test_len() {
+        assert_eq!(ShString22::new_from_str("").len(), 0);
+        assert_eq!(ShString22::new_from_str("Hello").len(), 5);
+        assert_eq!(ShString22::new_from_str("Somethingfortheweekend").len(), 22);
+        assert_eq!(ShString22::new_from_str("Dichlorodifluoromethane").len(), 23);
+        assert_eq!(ShString22::new_from_str("こんにちは").len(), 15);
+        assert_eq!(ShString22::new_from_str("❤️🧡💛💚💙💜").len(), 26);
+    }
+
+    #[test]
+    fn test_heap_allocated() {
+        assert!(!ShString22::new_from_str("").heap_allocated());
+        assert!(!ShString22::new_from_str("Hello").heap_allocated());
+        assert!(!ShString22::new_from_str("Somethingfortheweekend").heap_allocated());
+        assert!(!ShString22::new_from_str("こんにちは").heap_allocated());
+
+        assert!(ShString22::new_from_str("Dichlorodifluoromethane").heap_allocated());
+        assert!(ShString22::new_from_str("❤️🧡💛💚💙💜").heap_allocated());
+    }
+
+    #[test]
+    fn test_zero_capacity() {
+        assert_eq!(ShString::<0>::new_from_str("").as_str(), "");
+        assert!(!ShString::<0>::new_from_str("").heap_allocated());
+        assert_eq!(ShString::<0>::new_from_str("a").as_str(), "a");
+        assert!(ShString::<0>::new_from_str("a").heap_allocated());
+        assert_eq!(ShString::<0>::new_from_str("Hello").as_str(), "Hello");
+        assert!(ShString::<0>::new_from_str("Hello").heap_allocated());
     }
 }
