@@ -33,7 +33,12 @@ pub type ShString22 = ShString<22>;
 
 /// A non-growable string which may be allocated either on the stack or on the heap; strings `N`
 /// bytes or shorter will be allocated on the stack, while strings longer than `N` bytes will be
-/// allocated on the heap.
+/// allocated on the heap. Intended to be used when lots of small strings need to be stored, and
+/// these strings do not need to grow.
+/// 
+/// `N` must be less than or equal to `u8::MAX`. Exceeding this limit will cause a compile-time
+/// error. Clearly it be better for `N` to be a `u8` rather than a `usize`, but this is
+/// unfortunately not possible due to limitations of const generics.
 #[derive(Clone)]
 pub struct ShString<const N: usize>(Repr<N>);
 
