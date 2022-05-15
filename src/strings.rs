@@ -93,7 +93,7 @@ impl<const N: usize> ShString<N> {
     /// ```
     /// # use libshire::strings::ShString;
     /// let s = ShString::<22>::new_from_str("こんにちは");
-    /// assert_eq!(s.len(), 15)
+    /// assert_eq!(s.len(), 15);
     /// ```
     pub fn len(&self) -> usize {
         match self {
