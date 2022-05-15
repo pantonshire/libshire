@@ -1,0 +1,15 @@
+[package]
+name = "libshire"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+sqlx-actix-native-tls = ["sqlx/runtime-actix-native-tls"]
+sqlx-async-std-native-tls = ["sqlx/runtime-async-std-native-tls"]
+sqlx-actix-rustls = ["sqlx/runtime-actix-rustls"]
+sqlx-async-std-rustls = ["sqlx/runtime-async-std-rustls"]
+sqlx-tokio-rustls = ["sqlx/runtime-tokio-rustls"]
+sqlx-tokio-native-tls = ["sqlx/runtime-tokio-native-tls"]
+
+[dependencies]
+sqlx = { version = "0.5", optional = true }
