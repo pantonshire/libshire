@@ -185,6 +185,13 @@ impl<const N: usize> AsRef<str> for ShString<N> {
     }
 }
 
+impl<const N: usize> AsMut<str> for ShString<N> {
+    #[inline]
+    fn as_mut(&mut self) -> &mut str {
+        self
+    }
+}
+
 impl<const N: usize> borrow::Borrow<str> for ShString<N> {
     #[inline]
     fn borrow(&self) -> &str {
