@@ -21,8 +21,6 @@ use sqlx::{
 
 use buf::{StackString, HeapString};
 
-// TODO: inlining
-
 /// A non-growable string where strings 22 bytes or shorter are stored on the stack and longer
 /// strings are stored on the heap.
 /// 
