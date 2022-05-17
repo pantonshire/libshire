@@ -26,78 +26,21 @@ pub const fn infallible_to_never(infallible: Infallible) -> ! {
     infallible_elim(infallible)
 }
 
-/// The bottom type ⊥ with no elements. Since it has no elements, having an element of `Bot` is an
-/// inherent contradiction and it can therefore be converted to any other type. In MLTT, this
-/// corresponds to a proof by contradiction.
-/// 
-/// `Bot` serves the same purpose as `std::convert::Infallible` and the currently unstable "never"
-/// type `!`, but provides more convenience methods than the former.
-pub struct Bot(BotRepr);
-
-impl Bot {
-    #[inline]
-    #[must_use]
-    pub const fn elim<T>(self) -> T {
-        self.0.elim()
-    }
+pub trait Empty: Sized {
+    fn elim<T>(self) -> T;
 
     #[inline]
-    #[must_use]
-    pub const fn elim_ref<T>(&self) -> T {
-        self.0.elim()
-    }
-
-    #[inline]
-    pub const fn never(self) -> ! {
+    fn never(self) -> ! {
         self.elim()
     }
 }
 
-impl Clone for Bot {
+impl Empty for Infallible {
     #[inline]
-    fn clone(&self) -> Self {
-        self.elim_ref()
+    fn elim<T>(self) -> T {
+        infallible_elim(self)
     }
 }
-
-impl Copy for Bot {}
-
-impl From<Infallible> for Bot {
-    #[inline]
-    fn from(infallible: Infallible) -> Self {
-        infallible_elim(infallible)
-    }
-}
-
-impl From<Bot> for Infallible {
-    #[inline]
-    fn from(bot: Bot) -> Self {
-        bot.elim()
-    }
-}
-
-enum BotRepr {}
-
-impl BotRepr {
-    #[inline]
-    const fn elim<T>(self) -> T {
-        match self {}
-    }
-
-    #[inline]
-    const fn elim_ref<T>(&self) -> T {
-        match *self {}
-    }
-}
-
-impl Clone for BotRepr {
-    #[inline]
-    fn clone(&self) -> Self {
-        self.elim_ref()
-    }
-}
-
-impl Copy for BotRepr {}
 
 #[inline]
 #[must_use]

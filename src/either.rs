@@ -1,7 +1,12 @@
-use std::{convert::identity, hint, ops::{Deref, DerefMut}};
+use std::{
+    convert::identity,
+    hint,
+    ops::{Deref, DerefMut}
+};
 
 use Either::{Inl, Inr};
-use crate::convert::{clone, clone_mut, copy, copy_mut};
+use crate::convert::{clone, clone_mut, copy, copy_mut, Empty};
+
 pub enum Either<L, R> {
     Inl(L),
     Inr(R),
@@ -172,6 +177,24 @@ impl<L, R> Either<L, R> {
     #[must_use]
     pub fn flip(self) -> Either<R, L> {
         self.fold(Inr, Inl)
+    }
+
+    #[inline]
+    #[must_use]
+    pub fn elim_l(self) -> R
+    where
+        L: Empty,
+    {
+        self.fold_l(<L as Empty>::elim)
+    }
+
+    #[inline]
+    #[must_use]
+    pub fn elim_r(self) -> L
+    where
+        R: Empty,
+    {
+        self.fold_r(<R as Empty>::elim)
     }
 
     #[inline]
@@ -489,19 +512,17 @@ impl<T> Either<T, T> {
     }
 }
 
-impl<L, R> Clone for Either<L, R>
-where
-    L: Clone,
-    R: Clone,
-{
+impl<L: Empty, R: Empty> Empty for Either<L, R> {
+    fn elim<T>(self) -> T {
+        self.fold(<L as Empty>::elim, <R as Empty>::elim)
+    }
+}
+
+impl<L: Clone, R: Clone> Clone for Either<L, R> {
     #[inline]
     fn clone(&self) -> Self {
         self.as_ref().map(<L as Clone>::clone, <R as Clone>::clone)
     }
 }
 
-impl<L, R> Copy for Either<L, R>
-where
-    L: Copy,
-    R: Copy,
-{}
+impl<L: Copy, R: Copy> Copy for Either<L, R> {}
