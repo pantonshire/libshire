@@ -8,17 +8,6 @@ use std::{
     str::FromStr,
 };
 
-#[cfg(feature = "sqlx")]
-use sqlx::{
-    Database,
-    database::{HasArguments, HasValueRef},
-    Decode,
-    Encode,
-    Type,
-    encode::IsNull,
-    error::BoxDynError,
-};
-
 use buf::{StackString, HeapString};
 
 /// A non-growable string where strings 22 bytes or shorter are stored on the stack and longer
@@ -43,6 +32,12 @@ pub type ShString22 = ShString<22>;
 pub struct ShString<const N: usize>(Repr<N>);
 
 impl<const N: usize> ShString<N> {
+    #[inline]
+    #[must_use]
+    pub const fn empty() -> Self {
+        Self(Repr::Stack(StackString::empty()))
+    }
+
     /// Creates a new `ShString` from the given string slice, putting it on the stack if possible
     /// or creating a new heap allocation otherwise.
     #[inline]
@@ -157,6 +152,13 @@ impl<const N: usize> ShString<N> {
             Self(Repr::Stack(_)) => false,
             Self(Repr::Heap(_)) => true,
         }
+    }
+}
+
+impl<const N: usize> Default for ShString<N> {
+    #[inline]
+    fn default() -> Self {
+        Self::empty()
     }
 }
 
@@ -285,43 +287,6 @@ impl<const N: usize> fmt::Display for ShString<N> {
     }
 }
 
-#[cfg(feature = "sqlx")]
-impl<'r, DB, const N: usize> Decode<'r, DB> for ShString<N>
-where
-    DB: Database,
-    &'r str: Decode<'r, DB>,
-{
-    fn decode(value: <DB as HasValueRef<'r>>::ValueRef) -> Result<Self, BoxDynError> {
-        <&'r str as Decode<'r, DB>>::decode(value).map(Self::new_from_str)
-    }
-}
-
-#[cfg(feature = "sqlx")]
-impl<'q, DB, const N: usize> Encode<'q, DB> for ShString<N>
-where
-    DB: Database,
-    for<'a> &'a str: Encode<'q, DB>,
-{
-    fn encode_by_ref(&self, buf: &mut <DB as HasArguments<'q>>::ArgumentBuffer) -> IsNull {
-        <&str as Encode<'q, DB>>::encode(self.as_str(), buf)
-    }
-}
-
-#[cfg(feature = "sqlx")]
-impl<DB, const N: usize> Type<DB> for ShString<N>
-where
-    DB: Database,
-    for<'a> &'a str: Type<DB>,
-{
-    fn type_info() -> <DB as Database>::TypeInfo {
-        <&str as Type<DB>>::type_info()
-    }
-
-    fn compatible(ty: &<DB as Database>::TypeInfo) -> bool {
-        <&str as Type<DB>>::compatible(ty)
-    }
-}
-
 #[derive(Clone)]
 enum Repr<const N: usize> {
     Stack(StackString<N>),
@@ -349,6 +314,24 @@ mod buf {
             }
         };
 
+        /// Creates a new `StackString` from a given buffer and length.
+        /// 
+        /// # Safety
+        /// 
+        /// The first `len` bytes of `buf` (i.e. `buf[..len]`) must be valid UTF-8.
+        #[inline]
+        pub(super) const unsafe fn from_raw_parts(buf: [u8; N], len: u8) -> Self {
+            Self { buf, len }
+        }
+
+        #[inline]
+        pub(super) const fn empty() -> Self {
+            // SAFETY:
+            // The first zero bytes of the buffer are valid UTF-8, because an empty byte slice is
+            // valid UTF-8.
+            unsafe { Self::from_raw_parts([0; N], 0) }
+        }
+
         pub(super) fn from_str(s: &str) -> Option<Self> {
             let s = s.as_bytes();
 
@@ -361,7 +344,11 @@ mod buf {
 
             let mut buf = [0; N];
             buf[..usize::from(len)].copy_from_slice(s);
-            Some(Self { buf, len })
+
+            // SAFETY:
+            // The first `len` bytes of the buffer are valid UTF-8 because the first `len` bytes of
+            // the buffer contain data copied from a `&str`, and `&str` is always valid UTF-8.
+            unsafe { Some(Self::from_raw_parts(buf, len)) }
         }
 
         pub(super) fn as_str(&self) -> &str {
