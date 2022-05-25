@@ -35,6 +35,12 @@ pub struct Uuid([u8; 16]);
 impl Uuid {
     #[inline]
     #[must_use]
+    pub const fn nil() -> Self {
+        Self([0; 16])
+    }
+
+    #[inline]
+    #[must_use]
     pub const fn from_bytes(bytes: [u8; 16]) -> Self {
         Self(bytes)
     }
@@ -59,6 +65,13 @@ impl Uuid {
     #[must_use]
     pub fn to_bytes(self) -> [u8; 16] {
         self.0
+    }
+}
+
+impl Default for Uuid {
+    #[inline]
+    fn default() -> Self {
+        Self::nil()
     }
 }
 
