@@ -2,6 +2,9 @@ use std::{error, fmt, str};
 
 use crate::hex::{self, HexBytes};
 
+// TODO: make conformity to RFC 4122 an invariant of this type (which means it cannot be created
+// safely from an arbitrary [u8; 16]).
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[repr(transparent)]
 pub struct Uuid([u8; 16]);
