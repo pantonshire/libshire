@@ -138,6 +138,29 @@ impl fmt::Display for Uuid {
     }
 }
 
+#[cfg(feature = "serde")]
+impl serde::Serialize for Uuid {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer
+    {
+        // TODO: replace with a better string conversion function
+        serializer.serialize_str(&self.to_string())
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for Uuid {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>
+    {
+        let s: &str = serde::Deserialize::deserialize(deserializer)?;
+        s.parse()
+            .map_err(serde::de::Error::custom)
+    }
+}
+
 #[derive(Debug)]
 pub enum ParseError {
     NotEnoughGroups(usize),
