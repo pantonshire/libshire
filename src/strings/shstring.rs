@@ -287,6 +287,27 @@ impl<const N: usize> fmt::Display for ShString<N> {
     }
 }
 
+#[cfg(feature = "serde")]
+impl<const N: usize> serde::Serialize for ShString<N> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer
+    {
+        serde::Serialize::serialize(&**self, serializer)
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de, const N: usize> serde::Deserialize<'de> for ShString<N> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>
+    {
+        serde::Deserialize::deserialize(deserializer)
+            .map(Self::new_from_str)
+    }
+}
+
 #[derive(Clone)]
 enum Repr<const N: usize> {
     Stack(StackString<N>),
