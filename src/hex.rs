@@ -125,6 +125,8 @@ pub fn byte_to_hex_lower(byte: u8) -> (u8, u8) {
     )
 }
 
+/// Returns the ASCII byte corresponding to the given hex nybble, using lowercase for the digits A
+/// to F. Assumes the given value is less than 16.
 #[inline]
 fn nybble_to_hex_lower(nybble: u8) -> u8 {
     match nybble {
@@ -133,6 +135,14 @@ fn nybble_to_hex_lower(nybble: u8) -> u8 {
     }
 }
 
+/// Converts the given byte to its uppercase hexadecimal representation. The first byte returned
+/// encodes the most significant 4 bits, and the second byte encodes the least significant 4 bits.
+///
+/// ```
+/// # use libshire::hex::byte_to_hex_upper;
+/// assert_eq!(byte_to_hex_upper(15), (b'0', b'F'));
+/// assert_eq!(byte_to_hex_upper(139), (b'8', b'B'));
+/// ```
 #[inline]
 #[must_use]
 pub fn byte_to_hex_upper(byte: u8) -> (u8, u8) {
@@ -142,6 +152,8 @@ pub fn byte_to_hex_upper(byte: u8) -> (u8, u8) {
     )
 }
 
+/// Returns the ASCII byte corresponding to the given hex nybble, using uppercase for the digits A
+/// to F. Assumes the given value is less than 16.
 #[inline]
 fn nybble_to_hex_upper(nybble: u8) -> u8 {
     match nybble {
@@ -296,6 +308,32 @@ mod tests {
         assert_eq!(nybble_to_hex_upper(13), b'D');
         assert_eq!(nybble_to_hex_upper(14), b'E');
         assert_eq!(nybble_to_hex_upper(15), b'F');
+    }
+
+    #[test]
+    fn test_byte_to_hex_lower() {
+        assert_eq!(byte_to_hex_lower(0x00), (b'0', b'0'));
+        assert_eq!(byte_to_hex_lower(0x01), (b'0', b'1'));
+        assert_eq!(byte_to_hex_lower(0x0F), (b'0', b'f'));
+        assert_eq!(byte_to_hex_lower(0x10), (b'1', b'0'));
+        assert_eq!(byte_to_hex_lower(0x1F), (b'1', b'f'));
+        assert_eq!(byte_to_hex_lower(0x9A), (b'9', b'a'));
+        assert_eq!(byte_to_hex_lower(0xA9), (b'a', b'9'));
+        assert_eq!(byte_to_hex_lower(0xF0), (b'f', b'0'));
+        assert_eq!(byte_to_hex_lower(0xFF), (b'f', b'f'));
+    }
+
+    #[test]
+    fn test_byte_to_hex_upper() {
+        assert_eq!(byte_to_hex_upper(0x00), (b'0', b'0'));
+        assert_eq!(byte_to_hex_upper(0x01), (b'0', b'1'));
+        assert_eq!(byte_to_hex_upper(0x0F), (b'0', b'F'));
+        assert_eq!(byte_to_hex_upper(0x10), (b'1', b'0'));
+        assert_eq!(byte_to_hex_upper(0x1F), (b'1', b'F'));
+        assert_eq!(byte_to_hex_upper(0x9A), (b'9', b'A'));
+        assert_eq!(byte_to_hex_upper(0xA9), (b'A', b'9'));
+        assert_eq!(byte_to_hex_upper(0xF0), (b'F', b'0'));
+        assert_eq!(byte_to_hex_upper(0xFF), (b'F', b'F'));
     }
 
     #[test]

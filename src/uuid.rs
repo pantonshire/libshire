@@ -1,6 +1,6 @@
 use std::{error, fmt, str};
 
-use crate::hex::{self, HexBytes};
+use crate::{hex, strings::FixedString};
 
 // TODO: make conformity to RFC 4122 an invariant of this type (which means it cannot be created
 // safely from an arbitrary [u8; 16]).
@@ -69,6 +69,37 @@ impl Uuid {
     pub fn to_bytes(self) -> [u8; 16] {
         self.0
     }
+
+    #[must_use]
+    pub fn as_string(&self) -> FixedString<36> {
+        let mut buf = [0u8; 36];
+
+        for (i, byte) in self.0.iter().copied().enumerate() {
+            let (b0, b1) = hex::byte_to_hex_lower(byte);
+            let offset = match i {
+                0..=3 => 0,
+                4..=5 => 1,
+                6..=7 => 2,
+                8..=9 => 3,
+                _ => 4,
+            };
+            buf[i * 2 + offset] = b0;
+            buf[i * 2 + 1 + offset] = b1;
+        }
+
+        buf[8] = b'-';
+        buf[13] = b'-';
+        buf[18] = b'-';
+        buf[23] = b'-';
+
+        debug_assert!(str::from_utf8(&buf).is_ok());
+
+        // SAFETY:
+        // `byte_to_hex_lower` always returns a pair of ASCII characters, and `b'-'` is a valid
+        // ASCII character, so `buf` contains a valid ASCII string. All valid ASCII strings are
+        // also valid UTF-8, so `buf` is valid UTF-8.
+        unsafe { FixedString::from_raw_array(buf) }
+    }
 }
 
 impl Default for Uuid {
@@ -121,20 +152,9 @@ impl str::FromStr for Uuid {
     }
 }
 
-// TODO: UUIDs have a fixed-length string representation, so write a function which either creates
-// a string with that capacity or returns a string type with a compile-time known length.
-
 impl fmt::Display for Uuid {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{}-{}-{}-{}-{}",
-            HexBytes::<hex::Lowercase>::new(&self.0[..4]),
-            HexBytes::<hex::Lowercase>::new(&self.0[4..6]),
-            HexBytes::<hex::Lowercase>::new(&self.0[6..8]),
-            HexBytes::<hex::Lowercase>::new(&self.0[8..10]),
-            HexBytes::<hex::Lowercase>::new(&self.0[10..])
-        )
+        f.write_str(&self.as_string())
     }
 }
 
@@ -144,8 +164,7 @@ impl serde::Serialize for Uuid {
     where
         S: serde::Serializer
     {
-        // TODO: replace with a better string conversion function
-        serializer.serialize_str(&self.to_string())
+        serializer.serialize_str(&self.as_string())
     }
 }
 
