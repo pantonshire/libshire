@@ -1,3 +1,4 @@
+pub mod experimental;
 pub mod fixed_string;
 pub mod shstring;
 
