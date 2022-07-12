@@ -8,7 +8,7 @@ use std::{
     str::FromStr,
 };
 
-use buf::{StackString, HeapString};
+use super::StackString;
 
 /// A non-growable string where strings 22 bytes or shorter are stored on the stack and longer
 /// strings are stored on the heap.
@@ -42,31 +42,14 @@ impl<const N: usize> ShString<N> {
     /// or creating a new heap allocation otherwise.
     #[inline]
     #[must_use]
-    pub fn new_from_str(s: &str) -> Self {
-        match StackString::from_str(s) {
-            Some(stack_buf) => Self(Repr::Stack(stack_buf)),
-            None => Self(Repr::Heap(HeapString::from_str(s))),
-        }
-    }
-
-    /// Creates a new `ShString` from the given owned `String`, moving the string data onto the
-    /// stack if possible or reusing the `String`'s heap allocation otherwise.
-    #[inline]
-    #[must_use]
-    pub fn new_from_string(s: String) -> Self {
-        match StackString::from_str(&s) {
-            Some(stack_buf) => Self(Repr::Stack(stack_buf)),
-            None => Self(Repr::Heap(HeapString::from_string(s))),
-        }
-    }
-
-    /// Creates a new `ShString` from the given `Cow<str>`.
-    #[inline]
-    #[must_use]
-    pub fn new_from_cow_str(s: Cow<str>) -> Self {
-        match s {
-            Cow::Borrowed(s) => Self::new_from_str(s),
-            Cow::Owned(s) => Self::new_from_string(s),
+    pub fn new<S>(s: S) -> Self
+    where
+        S: AsRef<str>,
+        Box<str>: From<S>,
+    {
+        match StackString::new(&s) {
+            Ok(stack_buf) => Self(Repr::Stack(stack_buf)),
+            Err(_) => Self(Repr::Heap(Box::<str>::from(s))),
         }
     }
 
@@ -75,8 +58,8 @@ impl<const N: usize> ShString<N> {
     #[must_use]
     pub fn as_str(&self) -> &str {
         match self {
-            Self(Repr::Stack(buf)) => buf.as_str(),
-            Self(Repr::Heap(buf)) => buf.as_str(),
+            Self(Repr::Stack(buf)) => buf,
+            Self(Repr::Heap(buf)) => buf,
         }
     }
 
@@ -85,8 +68,8 @@ impl<const N: usize> ShString<N> {
     #[must_use]
     pub fn as_str_mut(&mut self) -> &mut str {
         match self {
-            Self(Repr::Stack(buf)) => buf.as_str_mut(),
-            Self(Repr::Heap(buf)) => buf.as_str_mut(),
+            Self(Repr::Stack(buf)) => buf,
+            Self(Repr::Heap(buf)) => buf,
         }
     }
 
@@ -104,7 +87,7 @@ impl<const N: usize> ShString<N> {
     /// 
     /// ```
     /// # use libshire::strings::ShString;
-    /// let s = ShString::<22>::new_from_str("こんにちは");
+    /// let s = ShString::<22>::new("こんにちは");
     /// assert_eq!(s.len(), 15);
     /// ```
     #[inline]
@@ -120,10 +103,10 @@ impl<const N: usize> ShString<N> {
     /// 
     /// ```
     /// # use libshire::strings::ShString;
-    /// let s1 = ShString::<22>::new_from_str("");
+    /// let s1 = ShString::<22>::new("");
     /// assert!(s1.is_empty());
     /// 
-    /// let s2 = ShString::<22>::new_from_str("Hello");
+    /// let s2 = ShString::<22>::new("Hello");
     /// assert!(!s2.is_empty());
     /// ```
     #[inline]
@@ -139,10 +122,10 @@ impl<const N: usize> ShString<N> {
     /// 
     /// ```
     /// # use libshire::strings::ShString;
-    /// let s1 = ShString::<22>::new_from_str("This string's 22 bytes");
+    /// let s1 = ShString::<22>::new("This string's 22 bytes");
     /// assert!(!s1.heap_allocated());
     /// 
-    /// let s2 = ShString::<22>::new_from_str("This string is 23 bytes");
+    /// let s2 = ShString::<22>::new("This string is 23 bytes");
     /// assert!(s2.heap_allocated());
     /// ```
     #[inline]
@@ -209,21 +192,21 @@ impl<const N: usize> borrow::BorrowMut<str> for ShString<N> {
 impl<'a, const N: usize> From<&'a str> for ShString<N> {
     #[inline]
     fn from(s: &'a str) -> Self {
-        Self::new_from_str(s)
+        Self::new(s)
     }
 }
 
 impl<const N: usize> From<String> for ShString<N> {
     #[inline]
     fn from(s: String) -> Self {
-        Self::new_from_string(s)
+        Self::new(s)
     }
 }
 
 impl<'a, const N: usize> From<Cow<'a, str>> for ShString<N> {
     #[inline]
     fn from(s: Cow<'a, str>) -> Self {
-        Self::new_from_cow_str(s)
+        Self::new(s)
     }
 }
 
@@ -269,7 +252,7 @@ impl<const N: usize> FromStr for ShString<N> {
 
     #[inline]
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(Self::new_from_str(s))
+        Ok(Self::new(s))
     }
 }
 
@@ -304,154 +287,14 @@ impl<'de, const N: usize> serde::Deserialize<'de> for ShString<N> {
         D: serde::Deserializer<'de>
     {
         serde::Deserialize::deserialize(deserializer)
-            .map(Self::new_from_str)
+            .map(Self::new::<&'de str>)
     }
 }
 
 #[derive(Clone)]
 enum Repr<const N: usize> {
     Stack(StackString<N>),
-    Heap(HeapString),
-}
-
-mod buf {
-    use std::str;
-
-    /// A stack-allocated string with a capacity of `N` bytes. `len` must be less than or equal to
-    /// `N`, and the first `len` bytes of `buf` must be valid UTF-8.
-    #[derive(Clone)]
-    pub(super) struct StackString<const N: usize> {
-        buf: [u8; N],
-        len: u8,
-    }
-
-    impl<const N: usize> StackString<N> {
-        const MAX_LEN: u8 = {
-            #[allow(clippy::cast_possible_truncation, clippy::checked_conversions)]
-            if N <= u8::MAX as usize {
-                N as u8
-            } else {
-                panic!("`N` must be within the bounds of `u8`")
-            }
-        };
-
-        /// Creates a new `StackString` from a given buffer and length.
-        /// 
-        /// # Safety
-        /// 
-        /// The first `len` bytes of `buf` (i.e. `buf[..len]`) must be valid UTF-8.
-        #[inline]
-        pub(super) const unsafe fn from_raw_parts(buf: [u8; N], len: u8) -> Self {
-            Self { buf, len }
-        }
-
-        #[inline]
-        pub(super) const fn empty() -> Self {
-            // SAFETY:
-            // The first zero bytes of the buffer are valid UTF-8, because an empty byte slice is
-            // valid UTF-8.
-            unsafe { Self::from_raw_parts([0; N], 0) }
-        }
-
-        pub(super) fn from_str(s: &str) -> Option<Self> {
-            let s = s.as_bytes();
-
-            // If the length of the string is greater than `Self::MAX_LEN`, it will not fit in the
-            // stack buffer so return `None`.
-            let len = u8::try_from(s.len()).ok()?;
-            if len > Self::MAX_LEN {
-                return None;
-            }
-
-            let mut buf = [0; N];
-            buf[..usize::from(len)].copy_from_slice(s);
-
-            // SAFETY:
-            // The first `len` bytes of the buffer are valid UTF-8 because the first `len` bytes of
-            // the buffer contain data copied from a `&str`, and `&str` is always valid UTF-8.
-            unsafe { Some(Self::from_raw_parts(buf, len)) }
-        }
-
-        pub(super) fn as_str(&self) -> &str {
-            // SAFETY:
-            // `len` being less than or equal to `N` is an invariant of `StackString`, so it is
-            // always within the bounds of `buf`.
-            let slice = unsafe { self.buf.get_unchecked(..usize::from(self.len)) };
-
-            // SAFETY:
-            // The first `len` bytes of `buf` being valid UTF-8 is an invariant of `StackString`.
-            unsafe { str::from_utf8_unchecked(slice) }
-        }
-
-        pub(super) fn as_str_mut(&mut self) -> &mut str {
-            // SAFETY:
-            // `len` being less than or equal to `N` is an invariant of `StackString`, so it is
-            // always within the bounds of `buf`.
-            let slice = unsafe { self.buf.get_unchecked_mut(..usize::from(self.len)) };
-
-            // SAFETY:
-            // The first `len` bytes of `buf` being valid UTF-8 is an invariant of `StackString`.
-            unsafe { str::from_utf8_unchecked_mut(slice) }
-        }
-
-        pub(super) fn into_string(self) -> String {
-            self.as_str().to_owned()
-        }
-
-        pub(super) fn len(&self) -> usize {
-            usize::from(self.len)
-        }
-
-        pub(super) fn is_empty(&self) -> bool {
-            self.len == 0
-        }
-    }
-
-    /// A heap-allocated non-growable string. `buf` must be valid UTF-8.
-    #[derive(Clone)]
-    pub(super) struct HeapString {
-        buf: Box<[u8]>,
-    }
-
-    impl HeapString {
-        pub(super) fn from_str(s: &str) -> Self {
-            Self {
-                buf: s.as_bytes().into(),
-            }
-        }
-
-        pub(super) fn from_string(s: String) -> Self {
-            Self {
-                buf: s.into_boxed_str().into_boxed_bytes(),
-            }
-        }
-
-        pub(super) fn as_str(&self) -> &str {
-            // SAFETY:
-            // `buf` being valid UTF-8 is an invariant of `HeapString`.
-            unsafe { str::from_utf8_unchecked(&self.buf) }
-        }
-
-        pub(super) fn as_str_mut(&mut self) -> &mut str {
-            // SAFETY:
-            // `buf` being valid UTF-8 is an invariant of `HeapString`.
-            unsafe { str::from_utf8_unchecked_mut(&mut self.buf) }
-        }
-
-        pub(super) fn into_string(self) -> String {
-            // SAFETY:
-            // `buf` being valid UTF-8 is an invariant of `HeapString`.
-            unsafe { String::from_utf8_unchecked(self.buf.into_vec()) }
-        }
-
-        pub(super) fn len(&self) -> usize {
-            self.buf.len()
-        }
-
-        pub(super) fn is_empty(&self) -> bool {
-            self.buf.is_empty()
-        }
-    }
+    Heap(Box<str>),
 }
 
 #[cfg(test)]
@@ -476,53 +319,53 @@ mod tests {
             let borrowed = Cow::Borrowed(s);
             let owned = Cow::<'static, str>::Owned(buf.clone());
 
-            assert_eq!(ShString22::new_from_str(s).as_str(), s);
-            assert_eq!(ShString22::new_from_string(buf).as_str(), s);
-            assert_eq!(ShString22::new_from_cow_str(borrowed).as_str(), s);
-            assert_eq!(ShString22::new_from_cow_str(owned).as_str(), s);
+            assert_eq!(ShString22::new(s).as_str(), s);
+            assert_eq!(ShString22::new(buf).as_str(), s);
+            assert_eq!(ShString22::new(borrowed).as_str(), s);
+            assert_eq!(ShString22::new(owned).as_str(), s);
         }
     }
 
     #[test]
     fn test_as_str_mut() {
-        let mut s1 = ShString22::new_from_str("hello");
+        let mut s1 = ShString22::new("hello");
         s1.as_str_mut().make_ascii_uppercase();
         assert_eq!(s1.as_str(), "HELLO");
 
-        let mut s2 = ShString22::new_from_str("the quick brown fox jumps over the lazy dog");
+        let mut s2 = ShString22::new("the quick brown fox jumps over the lazy dog");
         s2.as_str_mut().make_ascii_uppercase();
         assert_eq!(s2.as_str(), "THE QUICK BROWN FOX JUMPS OVER THE LAZY DOG");
     }
 
     #[test]
     fn test_len() {
-        assert_eq!(ShString22::new_from_str("").len(), 0);
-        assert_eq!(ShString22::new_from_str("Hello").len(), 5);
-        assert_eq!(ShString22::new_from_str("Somethingfortheweekend").len(), 22);
-        assert_eq!(ShString22::new_from_str("Dichlorodifluoromethane").len(), 23);
-        assert_eq!(ShString22::new_from_str("こんにちは").len(), 15);
-        assert_eq!(ShString22::new_from_str("❤️🧡💛💚💙💜").len(), 26);
+        assert_eq!(ShString22::new("").len(), 0);
+        assert_eq!(ShString22::new("Hello").len(), 5);
+        assert_eq!(ShString22::new("Somethingfortheweekend").len(), 22);
+        assert_eq!(ShString22::new("Dichlorodifluoromethane").len(), 23);
+        assert_eq!(ShString22::new("こんにちは").len(), 15);
+        assert_eq!(ShString22::new("❤️🧡💛💚💙💜").len(), 26);
     }
 
     #[test]
     fn test_heap_allocated() {
-        assert!(!ShString22::new_from_str("").heap_allocated());
-        assert!(!ShString22::new_from_str("Hello").heap_allocated());
-        assert!(!ShString22::new_from_str("Somethingfortheweekend").heap_allocated());
-        assert!(!ShString22::new_from_str("こんにちは").heap_allocated());
+        assert!(!ShString22::new("").heap_allocated());
+        assert!(!ShString22::new("Hello").heap_allocated());
+        assert!(!ShString22::new("Somethingfortheweekend").heap_allocated());
+        assert!(!ShString22::new("こんにちは").heap_allocated());
 
-        assert!(ShString22::new_from_str("Dichlorodifluoromethane").heap_allocated());
-        assert!(ShString22::new_from_str("Squishedbuginsidethescreen").heap_allocated());
-        assert!(ShString22::new_from_str("❤️🧡💛💚💙💜").heap_allocated());
+        assert!(ShString22::new("Dichlorodifluoromethane").heap_allocated());
+        assert!(ShString22::new("Squishedbuginsidethescreen").heap_allocated());
+        assert!(ShString22::new("❤️🧡💛💚💙💜").heap_allocated());
     }
 
     #[test]
     fn test_zero_capacity() {
-        assert_eq!(ShString::<0>::new_from_str("").as_str(), "");
-        assert!(!ShString::<0>::new_from_str("").heap_allocated());
-        assert_eq!(ShString::<0>::new_from_str("a").as_str(), "a");
-        assert!(ShString::<0>::new_from_str("a").heap_allocated());
-        assert_eq!(ShString::<0>::new_from_str("Hello").as_str(), "Hello");
-        assert!(ShString::<0>::new_from_str("Hello").heap_allocated());
+        assert_eq!(ShString::<0>::new("").as_str(), "");
+        assert!(!ShString::<0>::new("").heap_allocated());
+        assert_eq!(ShString::<0>::new("a").as_str(), "a");
+        assert!(ShString::<0>::new("a").heap_allocated());
+        assert_eq!(ShString::<0>::new("Hello").as_str(), "Hello");
+        assert!(ShString::<0>::new("Hello").heap_allocated());
     }
 }
