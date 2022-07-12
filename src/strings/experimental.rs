@@ -67,8 +67,8 @@ impl<const N: usize> ShString<N> {
 
                     // SAFETY:
                     // The first `len` bytes of `buf` are copied from a `&str`, so the first `len`
-                    // bytes are valid UTF-8. We have already checked that `len` is thess than or equal
-                    // to `Self::MAX_LEN`.
+                    // bytes are valid UTF-8. We have already checked that `len` is thess than or
+                    // equal to `Self::MAX_LEN`.
                     Self::stack_from_raw_parts(buf, len)
                 }
             },
