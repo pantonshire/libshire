@@ -512,6 +512,7 @@ mod tests {
         assert!(!ShString22::new_from_str("こんにちは").heap_allocated());
 
         assert!(ShString22::new_from_str("Dichlorodifluoromethane").heap_allocated());
+        assert!(ShString22::new_from_str("Squishedbuginsidethescreen").heap_allocated());
         assert!(ShString22::new_from_str("❤️🧡💛💚💙💜").heap_allocated());
     }
 
