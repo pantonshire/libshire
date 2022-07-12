@@ -1,35 +1,45 @@
 use std::{
-    borrow,
-    fmt,
-    mem::ManuallyDrop,
+    borrow, fmt,
+    mem::{ManuallyDrop, MaybeUninit},
     ops,
-    ptr::{addr_of, addr_of_mut},
-    slice,
-    str,
+    ptr::{self, addr_of, addr_of_mut},
+    slice, str,
 };
 
 use crate::either::Either::{self, Inl, Inr};
 
+pub type ShString23 = ShString<23>;
+
 /// An experimental alternative to `libshire::strings::ShString`, which is able to store one extra
 /// byte of string data on the stack in the same amount of space.
-// `repr(C)` is necessary to ensure that `Repr` starts at offset zero, so that it's properly
-// aligned within the struct.
+
+// `repr(C)` is necessary to ensure that `Repr` starts at offset 0, so that it's properly aligned
+// within the struct.
 #[repr(C)]
 pub struct ShString<const N: usize> {
     repr: Repr<N>,
+    // When `len` is less than or equal to `MAX_LEN`, `repr.stack` is active and the first `len`
+    // bytes of `repr.stack` contains initialised, valid UTF-8 data. When it is greater than
+    // `MAX_LEN`, `repr.heap` is active.
     len: u8,
+    // A zero-sized field to ensure that `ShString` has an alignment equal to the alignment of
+    // `Box<str>`, to ensure that `repr.heap` is properly aligned when it is active.
     _align: [Box<str>; 0],
 }
 
+// `repr(C)` is necessary to ensure that both of the fields start at offset 0. `repr(packed)`
+// reduces the alignment to 1, which allows `ShString` to be more compact.
 #[repr(C, packed)]
 union Repr<const N: usize> {
-    stack: [u8; N],
+    stack: [MaybeUninit<u8>; N],
     heap: ManuallyDrop<Box<str>>,
 }
 
 impl<const N: usize> ShString<N> {
     const MAX_LEN: u8 = {
         #[allow(clippy::cast_possible_truncation, clippy::checked_conversions)]
+        // `MAX_LEN` may be no larger than `u8::MAX - 1` to leave at least one bit pattern to
+        // represent the "stored on the heap" case.
         if N < u8::MAX as usize {
             N as u8
         } else {
@@ -43,17 +53,26 @@ impl<const N: usize> ShString<N> {
         S: AsRef<str>,
         Box<str>: From<S>,
     {
-        let bytes = s.as_ref().as_bytes();
-        match u8::try_from(bytes.len()) {
+        let src = s.as_ref().as_bytes();
+
+        match u8::try_from(src.len()) {
             Ok(len) if len <= Self::MAX_LEN => {
-                let mut buf = [0u8; N];
-                buf[..usize::from(len)].copy_from_slice(bytes);
-                // SAFETY:
-                // The first `len` bytes of `buf` are copied from a `&str`, so the first `len`
-                // bytes are valid UTF-8. We have already checked that `len` is thess than or equal
-                // to `Self::MAX_LEN`.
-                unsafe { Self::stack_from_raw_parts(buf, len) }
+                unsafe {
+                    let mut buf = MaybeUninit::<[MaybeUninit<u8>; N]>::uninit()
+                        .assume_init();
+
+                    let src_ptr = src.as_ptr() as *const MaybeUninit<u8>;
+
+                    ptr::copy_nonoverlapping(src_ptr, buf.as_mut_ptr(), usize::from(len));
+
+                    // SAFETY:
+                    // The first `len` bytes of `buf` are copied from a `&str`, so the first `len`
+                    // bytes are valid UTF-8. We have already checked that `len` is thess than or equal
+                    // to `Self::MAX_LEN`.
+                    Self::stack_from_raw_parts(buf, len)
+                }
             },
+
             _ => Self::new_heap(s),
         }
     }
@@ -61,11 +80,11 @@ impl<const N: usize> ShString<N> {
     /// # Safety
     /// The first `len` bytes of `buf` must be valid UTF-8. `len` must be less than or equal to
     /// `Self::MAX_LEN` (which is equal to `N`).
-    unsafe fn stack_from_raw_parts(buf: [u8; N], len: u8) -> Self {
+    unsafe fn stack_from_raw_parts(buf: [MaybeUninit<u8>; N], len: u8) -> Self {
         Self {
             repr: Repr { stack: buf },
             len,
-            _align: []
+            _align: [],
         }
     }
 
@@ -74,7 +93,9 @@ impl<const N: usize> ShString<N> {
         Box<str>: From<S>,
     {
         Self {
-            repr: Repr { heap: ManuallyDrop::new(Box::<str>::from(s)) },
+            repr: Repr {
+                heap: ManuallyDrop::new(Box::<str>::from(s)),
+            },
             len: u8::MAX,
             _align: [],
         }
@@ -84,9 +105,7 @@ impl<const N: usize> ShString<N> {
     #[must_use]
     pub fn as_str(&self) -> &str {
         match self.variant() {
-            // SAFETY:
-            // `stack` being valid UTF-8 when active is an invariant of `ShString`.
-            Inl(stack) => unsafe { str::from_utf8_unchecked(stack) },
+            Inl(stack) => stack,
             Inr(heap) => heap,
         }
     }
@@ -95,22 +114,67 @@ impl<const N: usize> ShString<N> {
     #[must_use]
     pub fn as_str_mut(&mut self) -> &mut str {
         match self.variant_mut() {
-            // SAFETY:
-            // `stack` being valid UTF-8 when active is an invariant of `ShString`.
-            Inl(stack) => unsafe { str::from_utf8_unchecked_mut(stack) },
+            Inl(stack) => stack,
             Inr(heap) => heap,
+        }
+    }
+
+    // #[inline]
+    // #[must_use]
+    // pub fn into_string(self) -> String {
+    //     match self.variant() {
+    //         Inl(stack) => stack.to_owned(),
+    //         Inr(heap) => heap.into_string(),
+    //     }
+    // }
+
+    #[inline]
+    #[must_use]
+    pub fn heap_allocated(&self) -> bool {
+        match self.variant() {
+            Inl(_) => false,
+            Inr(_) => true,
+        }
+    }
+
+    #[inline]
+    #[must_use]
+    pub fn len(&self) -> usize {
+        match self.variant() {
+            Inl(stack) => stack.len(),
+            Inr(heap) => heap.len(),
+        }
+    }
+
+    #[inline]
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        match self.variant() {
+            Inl(stack) => stack.is_empty(),
+            Inr(heap) => heap.is_empty(),
         }
     }
 
     #[inline(always)]
     #[must_use]
-    fn variant(&self) -> Either<&[u8], &ManuallyDrop<Box<str>>> {
+    fn variant(&self) -> Either<&str, &ManuallyDrop<Box<str>>> {
         if self.len <= Self::MAX_LEN {
             let slice = unsafe {
-                // The preferred way to read the fields of a packed struct is with `addr_of`.
-                let ptr = addr_of!(self.repr.stack) as *const u8;
-                let len = usize::from(self.len);
-                slice::from_raw_parts(ptr, len)
+                // Get a pointer to the `stack` field of the union.
+                // SAFETY:
+                // Since `len` is less no greater than `MAX_LEN`, the `stack` field must be active.
+                let ptr = addr_of!(self.repr.stack) as *const MaybeUninit<u8> as *const u8;
+
+                // SAFETY:
+                // The first `len` bytes of `stack` are always initialised, as this is an invariant
+                // of `ShString`.
+                let bytes = slice::from_raw_parts(ptr, usize::from(self.len));
+
+                // Perform an unchecked conversion from the byte slice to a string slice.
+                // SAFETY:
+                // The first `len` bytes of `stack` is always valid UTF-8, as this is an invariant
+                // of `ShString`.
+                str::from_utf8_unchecked(bytes)
             };
             Inl(slice)
         } else {
@@ -126,12 +190,17 @@ impl<const N: usize> ShString<N> {
 
     #[inline(always)]
     #[must_use]
-    fn variant_mut(&mut self) -> Either<&mut [u8], &mut ManuallyDrop<Box<str>>> {
+    fn variant_mut(&mut self) -> Either<&mut str, &mut ManuallyDrop<Box<str>>> {
         if self.len <= Self::MAX_LEN {
             let slice = unsafe {
-                let ptr = addr_of_mut!(self.repr.stack) as *mut u8;
-                let len = usize::from(self.len);
-                slice::from_raw_parts_mut(ptr, len)
+                let ptr = addr_of_mut!(self.repr.stack) as *mut MaybeUninit<u8> as *mut u8;
+
+                let bytes = slice::from_raw_parts_mut(ptr, usize::from(self.len));
+
+                // Perform an unchecked conversion from the byte slice to a string slice. This is
+                // sound because the first `len` bytes of `stack` is always valid UTF-8 when it is
+                // active, as this is an invariant of `ShString`.
+                str::from_utf8_unchecked_mut(bytes)
             };
             Inl(slice)
         } else {
@@ -213,11 +282,82 @@ impl<const N: usize> fmt::Display for ShString<N> {
 
 #[cfg(test)]
 mod tests {
+    use std::borrow::Cow;
+
     use super::*;
 
     #[test]
-    fn test_shstring_align() {
+    fn test_align() {
         use std::mem::align_of;
         assert_eq!(align_of::<ShString<23>>(), align_of::<Box<str>>());
+    }
+
+    #[test]
+    fn test_new() {
+        let test_strings = [
+            "",
+            "Hello",
+            "Somethingfortheweekend",
+            "Dichlorodifluoromethane",
+            "Electrocardiographically",
+            "こんにちは",
+            "❤️🧡💛💚💙💜",
+        ];
+
+        for s in test_strings {
+            let buf = s.to_owned();
+            let borrowed = Cow::Borrowed(s);
+            let owned = Cow::<'static, str>::Owned(buf.clone());
+
+            assert_eq!(ShString23::new(s).as_str(), s);
+            assert_eq!(ShString23::new(buf).as_str(), s);
+            assert_eq!(ShString23::new(borrowed).as_str(), s);
+            assert_eq!(ShString23::new(owned).as_str(), s);
+        }
+    }
+
+    #[test]
+    fn test_as_str_mut() {
+        let mut s1 = ShString23::new("hello");
+        s1.as_str_mut().make_ascii_uppercase();
+        assert_eq!(s1.as_str(), "HELLO");
+
+        let mut s2 = ShString23::new("the quick brown fox jumps over the lazy dog");
+        s2.as_str_mut().make_ascii_uppercase();
+        assert_eq!(s2.as_str(), "THE QUICK BROWN FOX JUMPS OVER THE LAZY DOG");
+    }
+
+    #[test]
+    fn test_len() {
+        assert_eq!(ShString23::new("").len(), 0);
+        assert_eq!(ShString23::new("Hello").len(), 5);
+        assert_eq!(ShString23::new("Somethingfortheweekend").len(), 22);
+        assert_eq!(ShString23::new("Dichlorodifluoromethane").len(), 23);
+        assert_eq!(ShString23::new("Electrocardiographically").len(), 24);
+        assert_eq!(ShString23::new("こんにちは").len(), 15);
+        assert_eq!(ShString23::new("❤️🧡💛💚💙💜").len(), 26);
+    }
+
+    #[test]
+    fn test_heap_allocated() {
+        assert!(!ShString23::new("").heap_allocated());
+        assert!(!ShString23::new("Hello").heap_allocated());
+        assert!(!ShString23::new("Somethingfortheweekend").heap_allocated());
+        assert!(!ShString23::new("Dichlorodifluoromethane").heap_allocated());
+        assert!(!ShString23::new("こんにちは").heap_allocated());
+
+        assert!(ShString23::new("Electrocardiographically").heap_allocated());
+        assert!(ShString23::new("Squishedbuginsidethescreen").heap_allocated());
+        assert!(ShString23::new("❤️🧡💛💚💙💜").heap_allocated());
+    }
+
+    #[test]
+    fn test_zero_capacity() {
+        assert_eq!(ShString::<0>::new("").as_str(), "");
+        assert!(!ShString::<0>::new("").heap_allocated());
+        assert_eq!(ShString::<0>::new("a").as_str(), "a");
+        assert!(ShString::<0>::new("a").heap_allocated());
+        assert_eq!(ShString::<0>::new("Hello").as_str(), "Hello");
+        assert!(ShString::<0>::new("Hello").heap_allocated());
     }
 }
