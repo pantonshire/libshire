@@ -51,7 +51,7 @@ pub fn clone<T: Clone>(x: &T) -> T {
 #[inline]
 #[must_use]
 pub fn clone_mut<T: Clone>(x: &mut T) -> T {
-    (&*x).clone()
+    (*x).clone()
 }
 
 #[inline]
