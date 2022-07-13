@@ -1,12 +1,13 @@
 use std::{
-    borrow, fmt,
-    mem::{ManuallyDrop, MaybeUninit},
+    borrow::{self, Cow},
+    convert::Infallible,
+    fmt,
+    mem::{self, ManuallyDrop, MaybeUninit},
     ops,
     ptr::{self, addr_of, addr_of_mut},
-    slice, str,
+    slice,
+    str,
 };
-
-use crate::either::Either::{self, Inl, Inr};
 
 pub type ShString23 = ShString<23>;
 
@@ -32,7 +33,7 @@ pub struct ShString<const N: usize> {
 #[repr(C, packed)]
 union Repr<const N: usize> {
     stack: [MaybeUninit<u8>; N],
-    heap: ManuallyDrop<Box<str>>,
+    heap: ManuallyDrop<MaybeUninit<Box<str>>>,
 }
 
 impl<const N: usize> ShString<N> {
@@ -94,7 +95,7 @@ impl<const N: usize> ShString<N> {
     {
         Self {
             repr: Repr {
-                heap: ManuallyDrop::new(Box::<str>::from(s)),
+                heap: ManuallyDrop::new(MaybeUninit::new(Box::from(s))),
             },
             len: u8::MAX,
             _align: [],
@@ -104,120 +105,148 @@ impl<const N: usize> ShString<N> {
     #[inline]
     #[must_use]
     pub fn as_str(&self) -> &str {
-        match self.variant() {
-            Inl(stack) => stack,
-            Inr(heap) => heap,
+        if self.heap_allocated() {
+            // SAFETY:
+            // `len` is greater than `Self::MAX_LEN`, which means that the `heap` field is
+            // active. `heap` is properly aligned because it is stored at offset 0 of
+            // `ShString` (since both `ShString` and `Repr` use `repr(C)`), and the alignment
+            // of `ShString` is equal to the alignment of `Box<str>`.
+            let box_str = unsafe { &*addr_of!(self.repr.heap) };
+
+            unsafe { box_str.assume_init_ref() }
+        } else {
+            // Get a pointer to the `stack` field of the union.
+            // SAFETY:
+            // Since `len` is less no greater than `MAX_LEN`, the `stack` field must be
+            // active.
+            let ptr = unsafe { addr_of!(self.repr.stack) }
+                as *const MaybeUninit<u8>
+                as *const u8;
+
+            // Construct a byte slice from the pointer to the string data and the length.
+            // SAFETY:
+            // The first `len` bytes of `stack` are always initialised, as this is an
+            // invariant of `ShString`.
+            let bytes = unsafe { slice::from_raw_parts(ptr, usize::from(self.len)) };
+
+            // Perform an unchecked conversion from the byte slice to a string slice.
+            // SAFETY:
+            // The first `len` bytes of `stack` is always valid UTF-8, as this is an
+            // invariant of `ShString`.
+            unsafe { str::from_utf8_unchecked(bytes) }
         }
     }
 
     #[inline]
     #[must_use]
     pub fn as_str_mut(&mut self) -> &mut str {
-        match self.variant_mut() {
-            Inl(stack) => stack,
-            Inr(heap) => heap,
+        if self.heap_allocated() {
+            // SAFETY:
+            // `len` is greater than `Self::MAX_LEN`, which means that the `heap` field is
+            // active. `heap` is properly aligned because it is stored at offset 0 of
+            // `ShString` (since both `ShString` and `Repr` use `repr(C)`), and the alignment
+            // of `ShString` is equal to the alignment of `Box<str>`.
+            let box_str = unsafe { &mut *addr_of_mut!(self.repr.heap) };
+
+            unsafe { box_str.assume_init_mut() }
+        } else {
+            // Get a pointer to the `stack` field of the union.
+            // SAFETY:
+            // Since `len` is less no greater than `MAX_LEN`, the `stack` field must be
+            // active.
+            let ptr = unsafe { addr_of_mut!(self.repr.stack) }
+                as *mut MaybeUninit<u8>
+                as *mut u8;
+
+            // Construct a byte slice from the pointer to the string data and the length.
+            // SAFETY:
+            // The first `len` bytes of `stack` are always initialised, as this is an
+            // invariant of `ShString`.
+            let bytes = unsafe { slice::from_raw_parts_mut(ptr, usize::from(self.len)) };
+
+            // Perform an unchecked conversion from the byte slice to a string slice.
+            // SAFETY:
+            // The first `len` bytes of `stack` is always valid UTF-8, as this is an
+            // invariant of `ShString`.
+            unsafe { str::from_utf8_unchecked_mut(bytes) }
         }
     }
 
-    // #[inline]
-    // #[must_use]
-    // pub fn into_string(self) -> String {
-    //     match self.variant() {
-    //         Inl(stack) => stack.to_owned(),
-    //         Inr(heap) => heap.into_string(),
-    //     }
-    // }
+    #[inline]
+    #[must_use]
+    pub fn into_string(self) -> String {
+        if self.heap_allocated() {
+            // Disable the destructor for `self`; we are transferring ownership of the allocated
+            // memory to the caller, so we don't want to run the drop implementation which would
+            // free the memory.
+            let mut this = ManuallyDrop::new(self);
+
+            // SAFETY:
+            // `len` is greater than `Self::MAX_LEN`, which means that the `heap` field is
+            // active. `heap` is properly aligned because it is stored at offset 0 of
+            // `ShString` (since both `ShString` and `Repr` use `repr(C)`), and the alignment
+            // of `ShString` is equal to the alignment of `Box<str>`.
+            let field_ref = unsafe { &mut *addr_of_mut!(this.repr.heap) };
+
+            let manual_box_str = mem::replace(field_ref, ManuallyDrop::new(MaybeUninit::uninit()));
+
+            let maybe_box_str = ManuallyDrop::into_inner(manual_box_str);
+
+            let box_str = unsafe { maybe_box_str.assume_init() };
+            
+            box_str.into_string()
+        } else {
+            // Get a pointer to the `stack` field of the union.
+            // SAFETY:
+            // Since `len` is less no greater than `MAX_LEN`, the `stack` field must be
+            // active.
+            let ptr = unsafe { addr_of!(self.repr.stack) }
+                as *const MaybeUninit<u8>
+                as *const u8;
+
+            // Construct a byte slice from the pointer to the string data and the length.
+            // SAFETY:
+            // The first `len` bytes of `stack` are always initialised, as this is an
+            // invariant of `ShString`.
+            let bytes = unsafe { slice::from_raw_parts(ptr, usize::from(self.len)) };
+
+            // Perform an unchecked conversion from the byte slice to a string slice.
+            // SAFETY:
+            // The first `len` bytes of `stack` is always valid UTF-8, as this is an
+            // invariant of `ShString`.
+            let str_slice = unsafe { str::from_utf8_unchecked(bytes) };
+
+            str_slice.to_owned()
+        }
+    }
 
     #[inline]
     #[must_use]
     pub fn heap_allocated(&self) -> bool {
-        match self.variant() {
-            Inl(_) => false,
-            Inr(_) => true,
-        }
+        self.len > Self::MAX_LEN
     }
 
     #[inline]
     #[must_use]
     pub fn len(&self) -> usize {
-        match self.variant() {
-            Inl(stack) => stack.len(),
-            Inr(heap) => heap.len(),
-        }
+        self.as_str().len()
     }
 
     #[inline]
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        match self.variant() {
-            Inl(stack) => stack.is_empty(),
-            Inr(heap) => heap.is_empty(),
-        }
-    }
-
-    #[inline(always)]
-    #[must_use]
-    fn variant(&self) -> Either<&str, &ManuallyDrop<Box<str>>> {
-        if self.len <= Self::MAX_LEN {
-            let slice = unsafe {
-                // Get a pointer to the `stack` field of the union.
-                // SAFETY:
-                // Since `len` is less no greater than `MAX_LEN`, the `stack` field must be active.
-                let ptr = addr_of!(self.repr.stack) as *const MaybeUninit<u8> as *const u8;
-
-                // SAFETY:
-                // The first `len` bytes of `stack` are always initialised, as this is an invariant
-                // of `ShString`.
-                let bytes = slice::from_raw_parts(ptr, usize::from(self.len));
-
-                // Perform an unchecked conversion from the byte slice to a string slice.
-                // SAFETY:
-                // The first `len` bytes of `stack` is always valid UTF-8, as this is an invariant
-                // of `ShString`.
-                str::from_utf8_unchecked(bytes)
-            };
-            Inl(slice)
-        } else {
-            // SAFETY:
-            // `len` is greater than `Self::MAX_LEN`, which means that the `heap` field is active.
-            // `heap` is properly aligned because it is stored at offset 0 of `ShString` (since
-            // both `ShString` and `Repr` use `repr(C)`), and the alignment of `ShString` is equal
-            // to the alignment of `Box<str>`.
-            let heap = unsafe { &*addr_of!(self.repr.heap) };
-            Inr(heap)
-        }
-    }
-
-    #[inline(always)]
-    #[must_use]
-    fn variant_mut(&mut self) -> Either<&mut str, &mut ManuallyDrop<Box<str>>> {
-        if self.len <= Self::MAX_LEN {
-            let slice = unsafe {
-                let ptr = addr_of_mut!(self.repr.stack) as *mut MaybeUninit<u8> as *mut u8;
-
-                let bytes = slice::from_raw_parts_mut(ptr, usize::from(self.len));
-
-                // Perform an unchecked conversion from the byte slice to a string slice. This is
-                // sound because the first `len` bytes of `stack` is always valid UTF-8 when it is
-                // active, as this is an invariant of `ShString`.
-                str::from_utf8_unchecked_mut(bytes)
-            };
-            Inl(slice)
-        } else {
-            let heap = unsafe { &mut *addr_of_mut!(self.repr.heap) };
-            Inr(heap)
-        }
+        self.as_str().is_empty()
     }
 }
 
 impl<const N: usize> Drop for ShString<N> {
     fn drop(&mut self) {
-        if let Inr(heap) = self.variant_mut() {
+        if self.heap_allocated() {
+            let heap = unsafe { &mut *addr_of_mut!(self.repr.heap) };
+
             // SAFETY:
             // Since this is a drop implementation, `heap` will not be used again after this.
-            unsafe {
-                let _ = ManuallyDrop::take(heap);
-            }
+            let _ = unsafe { ManuallyDrop::take(heap).assume_init() };
         }
     }
 }
@@ -266,6 +295,36 @@ impl<const N: usize> borrow::BorrowMut<str> for ShString<N> {
     }
 }
 
+impl<'a, const N: usize> From<&'a str> for ShString<N> {
+    #[inline]
+    fn from(s: &'a str) -> Self {
+        Self::new(s)
+    }
+}
+
+impl<const N: usize> From<String> for ShString<N> {
+    #[inline]
+    fn from(s: String) -> Self {
+        Self::new(s)
+    }
+}
+
+impl<'a, const N: usize> From<Cow<'a, str>> for ShString<N> {
+    #[inline]
+    fn from(s: Cow<'a, str>) -> Self {
+        Self::new(s)
+    }
+}
+
+impl<const N: usize> str::FromStr for ShString<N> {
+    type Err = Infallible;
+
+    #[inline]
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self::new(s))
+    }
+}
+
 impl<const N: usize> fmt::Debug for ShString<N> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Debug::fmt(&**self, f)
@@ -277,8 +336,6 @@ impl<const N: usize> fmt::Display for ShString<N> {
         fmt::Display::fmt(&**self, f)
     }
 }
-
-// TODO: ** lots of MIRI tests! **
 
 #[cfg(test)]
 mod tests {
@@ -325,6 +382,23 @@ mod tests {
         let mut s2 = ShString23::new("the quick brown fox jumps over the lazy dog");
         s2.as_str_mut().make_ascii_uppercase();
         assert_eq!(s2.as_str(), "THE QUICK BROWN FOX JUMPS OVER THE LAZY DOG");
+    }
+
+    #[test]
+    fn test_into_string() {
+        let test_strings = [
+            "".to_owned(),
+            "Hello".to_owned(),
+            "Somethingfortheweekend".to_owned(),
+            "Dichlorodifluoromethane".to_owned(),
+            "Electrocardiographically".to_owned(),
+            "こんにちは".to_owned(),
+            "❤️🧡💛💚💙💜".to_owned(),
+        ];
+
+        for s in test_strings {
+            assert_eq!(ShString23::new(&*s).into_string(), s);
+        }
     }
 
     #[test]
