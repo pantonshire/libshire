@@ -1,18 +1,39 @@
 use std::{
     convert::identity,
+    fmt,
     hint,
-    ops::{Deref, DerefMut}
+    ops::{Deref, DerefMut},
+    process::{ExitCode, Termination},
 };
 
-use Either::{Inl, Inr};
 use crate::convert::{clone, clone_mut, copy, copy_mut, Empty};
 
+pub use Either::{Inl, Inr};
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum Either<L, R> {
     Inl(L),
     Inr(R),
 }
 
 impl<L, R> Either<L, R> {
+    /// Returns a new `Either` that is `Inl` if the given result is `Ok`, and `Inr` if the given
+    /// result is `Err`.
+    /// 
+    /// ```
+    /// # use libshire::either::{Either, Inl, Inr};
+    /// let res = u8::try_from(123u32);
+    /// assert_eq!(Either::from_result(res), Inl(123));
+    /// ```
+    #[inline]
+    #[must_use]
+    pub fn from_result(result: Result<L, R>) -> Self {
+        match result {
+            Ok(l) => Inl(l),
+            Err(r) => Inr(r),
+        }
+    }
+
     #[inline]
     #[must_use]
     pub const fn as_ref(&self) -> Either<&L, &R> {
@@ -132,7 +153,7 @@ impl<L, R> Either<L, R> {
 
     #[inline]
     #[must_use]
-    pub fn select<T>(self, if_l: T, if_r: T) -> T {
+    pub fn select<T>(&self, if_l: T, if_r: T) -> T {
         match self {
             Inl(_) => if_l,
             Inr(_) => if_r,
@@ -163,13 +184,13 @@ impl<L, R> Either<L, R> {
 
     #[inline]
     #[must_use]
-    pub fn is_l(self) -> bool {
+    pub fn is_l(&self) -> bool {
         self.select(true, false)
     }
 
     #[inline]
     #[must_use]
-    pub fn is_r(self) -> bool {
+    pub fn is_r(&self) -> bool {
         self.select(false, true)
     }
 
@@ -512,17 +533,80 @@ impl<T> Either<T, T> {
     }
 }
 
-impl<L: Empty, R: Empty> Empty for Either<L, R> {
+impl<T> Either<T, ()> {
+    #[inline]
+    #[must_use]
+    pub fn from_option(option: Option<T>) -> Self {
+        option.map_or(Inr(()), Inl)
+    }
+
+    #[inline]
+    #[must_use]
+    pub fn into_option(self) -> Option<T> {
+        self.fold(Some, |_| None)
+    }
+}
+
+impl<T> From<Either<T, ()>> for Option<T> {
+    #[inline]
+    fn from(either: Either<T, ()>) -> Self {
+        either.into_option()
+    }
+}
+
+impl<T> From<Option<T>> for Either<T, ()> {
+    #[inline]
+    fn from(option: Option<T>) -> Self {
+        Either::from_option(option)
+    }
+}
+
+impl<L, R> From<Either<L, R>> for Result<L, R> {
+    #[inline]
+    fn from(either: Either<L, R>) -> Self {
+        either.into_result()
+    }
+}
+
+impl<L, R> From<Result<L, R>> for Either<L, R> {
+    #[inline]
+    fn from(result: Result<L, R>) -> Self {
+        Either::from_result(result)
+    }
+}
+
+impl<L, R> Empty for Either<L, R>
+where
+    L: Empty,
+    R: Empty,
+{
+    #[inline]
     fn elim<T>(self) -> T {
         self.fold(<L as Empty>::elim, <R as Empty>::elim)
     }
 }
 
-impl<L: Clone, R: Clone> Clone for Either<L, R> {
+impl<L, R> Termination for Either<L, R>
+where
+    L: Termination,
+    R: Termination,
+{
     #[inline]
-    fn clone(&self) -> Self {
-        self.as_ref().map(<L as Clone>::clone, <R as Clone>::clone)
+    fn report(self) -> ExitCode {
+        self.fold(<L as Termination>::report, <R as Termination>::report)
     }
 }
 
-impl<L: Copy, R: Copy> Copy for Either<L, R> {}
+impl<L, R> fmt::Display for Either<L, R>
+where
+    L: fmt::Display,
+    R: fmt::Display,
+{
+    #[inline]
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Inl(l) => <L as fmt::Display>::fmt(l, f),
+            Inr(r) => <R as fmt::Display>::fmt(r, f),
+        }
+    }
+}
