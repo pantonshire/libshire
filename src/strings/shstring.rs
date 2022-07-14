@@ -8,7 +8,7 @@ use std::{
     str::FromStr,
 };
 
-use super::StackString;
+use super::InlineString;
 
 /// A non-growable string where strings 22 bytes or shorter are stored on the stack and longer
 /// strings are stored on the heap.
@@ -35,7 +35,7 @@ impl<const N: usize> ShString<N> {
     #[inline]
     #[must_use]
     pub const fn empty() -> Self {
-        Self(Repr::Stack(StackString::empty()))
+        Self(Repr::Inline(InlineString::empty()))
     }
 
     /// Creates a new `ShString` from the given string slice, putting it on the stack if possible
@@ -47,8 +47,8 @@ impl<const N: usize> ShString<N> {
         S: AsRef<str>,
         Box<str>: From<S>,
     {
-        match StackString::new(&s) {
-            Ok(stack_buf) => Self(Repr::Stack(stack_buf)),
+        match InlineString::new(&s) {
+            Ok(stack_buf) => Self(Repr::Inline(stack_buf)),
             Err(_) => Self(Repr::Heap(Box::<str>::from(s))),
         }
     }
@@ -58,7 +58,7 @@ impl<const N: usize> ShString<N> {
     #[must_use]
     pub fn as_str(&self) -> &str {
         match self {
-            Self(Repr::Stack(buf)) => buf,
+            Self(Repr::Inline(buf)) => buf,
             Self(Repr::Heap(buf)) => buf,
         }
     }
@@ -68,7 +68,7 @@ impl<const N: usize> ShString<N> {
     #[must_use]
     pub fn as_str_mut(&mut self) -> &mut str {
         match self {
-            Self(Repr::Stack(buf)) => buf,
+            Self(Repr::Inline(buf)) => buf,
             Self(Repr::Heap(buf)) => buf,
         }
     }
@@ -78,7 +78,7 @@ impl<const N: usize> ShString<N> {
     #[must_use]
     pub fn into_string(self) -> String {
         match self {
-            Self(Repr::Stack(buf)) => buf.into_string(),
+            Self(Repr::Inline(buf)) => buf.into_string(),
             Self(Repr::Heap(buf)) => buf.into_string(),
         }
     }
@@ -94,7 +94,7 @@ impl<const N: usize> ShString<N> {
     #[must_use]
     pub fn len(&self) -> usize {
         match self {
-            Self(Repr::Stack(buf)) => buf.len(),
+            Self(Repr::Inline(buf)) => buf.len(),
             Self(Repr::Heap(buf)) => buf.len(),
         }
     }
@@ -113,7 +113,7 @@ impl<const N: usize> ShString<N> {
     #[must_use]
     pub fn is_empty(&self) -> bool {
         match self {
-            Self(Repr::Stack(buf)) => buf.is_empty(),
+            Self(Repr::Inline(buf)) => buf.is_empty(),
             Self(Repr::Heap(buf)) => buf.is_empty(),
         }
     }
@@ -132,7 +132,7 @@ impl<const N: usize> ShString<N> {
     #[must_use]
     pub fn heap_allocated(&self) -> bool {
         match self {
-            Self(Repr::Stack(_)) => false,
+            Self(Repr::Inline(_)) => false,
             Self(Repr::Heap(_)) => true,
         }
     }
@@ -293,7 +293,7 @@ impl<'de, const N: usize> serde::Deserialize<'de> for ShString<N> {
 
 #[derive(Clone)]
 enum Repr<const N: usize> {
-    Stack(StackString<N>),
+    Inline(InlineString<N>),
     Heap(Box<str>),
 }
 
