@@ -49,7 +49,7 @@ impl<const N: usize> ShString<N> {
     {
         match InlineString::new(&s) {
             Ok(stack_buf) => Self(Repr::Inline(stack_buf)),
-            Err(_) => Self(Repr::Heap(Box::<str>::from(s))),
+            Err(_) => Self(Repr::Boxed(Box::<str>::from(s))),
         }
     }
 
@@ -59,7 +59,7 @@ impl<const N: usize> ShString<N> {
     pub fn as_str(&self) -> &str {
         match self {
             Self(Repr::Inline(buf)) => buf,
-            Self(Repr::Heap(buf)) => buf,
+            Self(Repr::Boxed(buf)) => buf,
         }
     }
 
@@ -69,7 +69,7 @@ impl<const N: usize> ShString<N> {
     pub fn as_str_mut(&mut self) -> &mut str {
         match self {
             Self(Repr::Inline(buf)) => buf,
-            Self(Repr::Heap(buf)) => buf,
+            Self(Repr::Boxed(buf)) => buf,
         }
     }
 
@@ -79,7 +79,7 @@ impl<const N: usize> ShString<N> {
     pub fn into_string(self) -> String {
         match self {
             Self(Repr::Inline(buf)) => buf.into_string(),
-            Self(Repr::Heap(buf)) => buf.into_string(),
+            Self(Repr::Boxed(buf)) => buf.into_string(),
         }
     }
 
@@ -95,7 +95,7 @@ impl<const N: usize> ShString<N> {
     pub fn len(&self) -> usize {
         match self {
             Self(Repr::Inline(buf)) => buf.len(),
-            Self(Repr::Heap(buf)) => buf.len(),
+            Self(Repr::Boxed(buf)) => buf.len(),
         }
     }
 
@@ -114,7 +114,7 @@ impl<const N: usize> ShString<N> {
     pub fn is_empty(&self) -> bool {
         match self {
             Self(Repr::Inline(buf)) => buf.is_empty(),
-            Self(Repr::Heap(buf)) => buf.is_empty(),
+            Self(Repr::Boxed(buf)) => buf.is_empty(),
         }
     }
 
@@ -133,7 +133,7 @@ impl<const N: usize> ShString<N> {
     pub fn heap_allocated(&self) -> bool {
         match self {
             Self(Repr::Inline(_)) => false,
-            Self(Repr::Heap(_)) => true,
+            Self(Repr::Boxed(_)) => true,
         }
     }
 }
@@ -294,7 +294,7 @@ impl<'de, const N: usize> serde::Deserialize<'de> for ShString<N> {
 #[derive(Clone)]
 enum Repr<const N: usize> {
     Inline(InlineString<N>),
-    Heap(Box<str>),
+    Boxed(Box<str>),
 }
 
 #[cfg(test)]

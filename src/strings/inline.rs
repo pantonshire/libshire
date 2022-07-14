@@ -46,7 +46,7 @@ impl<const N: usize> InlineString<N> {
     }
 
     #[inline]
-    pub fn new<S>(s: &S) -> Result<Self, InlineStringError>
+    pub fn new<S>(s: &S) -> Result<Self, Error>
     where
         S: AsRef<str> + ?Sized,
     {
@@ -59,7 +59,7 @@ impl<const N: usize> InlineString<N> {
         let len = u8::try_from(s.len())
             .ok()
             .and_then(|len| (len <= Self::MAX_LEN).then_some(len))
-            .ok_or(InlineStringError {
+            .ok_or(Error {
                 max_len: N,
                 actual_len: s.len(),
             })?;
@@ -162,7 +162,7 @@ impl<const N: usize> borrow::BorrowMut<str> for InlineString<N> {
 }
 
 impl<'a, const N: usize> TryFrom<&'a str> for InlineString<N> {
-    type Error = InlineStringError;
+    type Error = Error;
 
     #[inline]
     fn try_from(s: &'a str) -> Result<Self, Self::Error> {
@@ -171,7 +171,7 @@ impl<'a, const N: usize> TryFrom<&'a str> for InlineString<N> {
 }
 
 impl<const N: usize> TryFrom<String> for InlineString<N> {
-    type Error = InlineStringError;
+    type Error = Error;
 
     #[inline]
     fn try_from(s: String) -> Result<Self, Self::Error> {
@@ -180,7 +180,7 @@ impl<const N: usize> TryFrom<String> for InlineString<N> {
 }
 
 impl<'a, const N: usize> TryFrom<Cow<'a, str>> for InlineString<N> {
-    type Error = InlineStringError;
+    type Error = Error;
 
     #[inline]
     fn try_from(s: Cow<'a, str>) -> Result<Self, Self::Error> {
@@ -226,7 +226,7 @@ impl<const N: usize> Hash for InlineString<N> {
 }
 
 impl<const N: usize> str::FromStr for InlineString<N> {
-    type Err = InlineStringError;
+    type Err = Error;
 
     #[inline]
     fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -249,12 +249,12 @@ impl<const N: usize> fmt::Display for InlineString<N> {
 }
 
 #[derive(Debug)]
-pub struct InlineStringError {
+pub struct Error {
     max_len: usize,
     actual_len: usize,
 }
 
-impl InlineStringError {
+impl Error {
     pub fn max_len(&self) -> usize {
         self.max_len
     }
@@ -264,7 +264,7 @@ impl InlineStringError {
     }
 }
 
-impl fmt::Display for InlineStringError {
+impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
@@ -275,4 +275,4 @@ impl fmt::Display for InlineStringError {
     }
 }
 
-impl error::Error for InlineStringError {}
+impl error::Error for Error {}

@@ -26,9 +26,9 @@ impl<const N: usize> FixedString<N> {
     pub unsafe fn from_raw_slice(bytes: &[u8]) -> Result<Self, Error> {
         match bytes.try_into() {
             Ok(bytes) => Ok(Self::from_raw_array(bytes)),
-            Err(_) => Err(Error::BadLength {
-                expected: N,
-                actual: bytes.len(),
+            Err(_) => Err(Error {
+                expected_len: N,
+                actual_len: bytes.len(),
             }),
         }
     }
@@ -175,21 +175,19 @@ impl<const N: usize> fmt::Display for FixedString<N> {
 }
 
 #[derive(Debug)]
-pub enum Error {
-    BadLength { expected: usize, actual: usize },
+pub struct Error {
+    expected_len: usize,
+    actual_len: usize,
 }
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Error::BadLength { expected, actual } => {
-                write!(
-                    f,
-                    "expected {} bytes of string data, found {} bytes",
-                    expected, actual
-                )
-            }
-        }
+        write!(
+            f,
+            "expected {} bytes of string data, found {} bytes",
+            self.expected_len,
+            self.actual_len
+        )
     }
 }
 
