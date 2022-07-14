@@ -9,12 +9,12 @@ use std::{
 };
 
 #[derive(Clone)]
-pub struct InlineString<const N: usize> {
+pub struct CappedString<const N: usize> {
     buf: [u8; N],
     len: u8,
 }
 
-impl<const N: usize> InlineString<N> {
+impl<const N: usize> CappedString<N> {
     const MAX_LEN: u8 = {
         #[allow(clippy::cast_possible_truncation, clippy::checked_conversions)]
         if N <= u8::MAX as usize {
@@ -24,7 +24,7 @@ impl<const N: usize> InlineString<N> {
         }
     };
 
-    /// Creates a new `InlineString` from a given byte buffer and length.
+    /// Creates a new `CappedString` from a given byte buffer and length.
     ///
     /// # Safety
     ///
@@ -35,7 +35,7 @@ impl<const N: usize> InlineString<N> {
         Self { buf, len }
     }
 
-    /// Returns a new empty `InlineString`.
+    /// Returns a new empty `CappedString`.
     #[inline]
     #[must_use]
     pub const fn empty() -> Self {
@@ -76,24 +76,24 @@ impl<const N: usize> InlineString<N> {
     /// Returns a string slice pointing to the underlying string data.
     pub fn as_str(&self) -> &str {
         // SAFETY:
-        // `len` being less than or equal to `N` is an invariant of `InlineString`, so it is
+        // `len` being less than or equal to `N` is an invariant of `CappedString`, so it is
         // always within the bounds of `buf`.
         let slice = unsafe { self.buf.get_unchecked(..usize::from(self.len)) };
 
         // SAFETY:
-        // The first `len` bytes of `buf` being valid UTF-8 is an invariant of `InlineString`.
+        // The first `len` bytes of `buf` being valid UTF-8 is an invariant of `CappedString`.
         unsafe { str::from_utf8_unchecked(slice) }
     }
 
     /// Returns a mutable string slice pointing to the underlying string data.
     pub fn as_str_mut(&mut self) -> &mut str {
         // SAFETY:
-        // `len` being less than or equal to `N` is an invariant of `InlineString`, so it is
+        // `len` being less than or equal to `N` is an invariant of `CappedString`, so it is
         // always within the bounds of `buf`.
         let slice = unsafe { self.buf.get_unchecked_mut(..usize::from(self.len)) };
 
         // SAFETY:
-        // The first `len` bytes of `buf` being valid UTF-8 is an invariant of `InlineString`.
+        // The first `len` bytes of `buf` being valid UTF-8 is an invariant of `CappedString`.
         unsafe { str::from_utf8_unchecked_mut(slice) }
     }
 
@@ -110,14 +110,14 @@ impl<const N: usize> InlineString<N> {
     }
 }
 
-impl<const N: usize> Default for InlineString<N> {
+impl<const N: usize> Default for CappedString<N> {
     #[inline]
     fn default() -> Self {
         Self::empty()
     }
 }
 
-impl<const N: usize> ops::Deref for InlineString<N> {
+impl<const N: usize> ops::Deref for CappedString<N> {
     type Target = str;
 
     #[inline]
@@ -126,42 +126,42 @@ impl<const N: usize> ops::Deref for InlineString<N> {
     }
 }
 
-impl<const N: usize> ops::DerefMut for InlineString<N> {
+impl<const N: usize> ops::DerefMut for CappedString<N> {
     #[inline]
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.as_str_mut()
     }
 }
 
-impl<const N: usize> AsRef<str> for InlineString<N> {
+impl<const N: usize> AsRef<str> for CappedString<N> {
     #[inline]
     fn as_ref(&self) -> &str {
         self
     }
 }
 
-impl<const N: usize> AsMut<str> for InlineString<N> {
+impl<const N: usize> AsMut<str> for CappedString<N> {
     #[inline]
     fn as_mut(&mut self) -> &mut str {
         self
     }
 }
 
-impl<const N: usize> borrow::Borrow<str> for InlineString<N> {
+impl<const N: usize> borrow::Borrow<str> for CappedString<N> {
     #[inline]
     fn borrow(&self) -> &str {
         self
     }
 }
 
-impl<const N: usize> borrow::BorrowMut<str> for InlineString<N> {
+impl<const N: usize> borrow::BorrowMut<str> for CappedString<N> {
     #[inline]
     fn borrow_mut(&mut self) -> &mut str {
         self
     }
 }
 
-impl<'a, const N: usize> TryFrom<&'a str> for InlineString<N> {
+impl<'a, const N: usize> TryFrom<&'a str> for CappedString<N> {
     type Error = Error;
 
     #[inline]
@@ -170,7 +170,7 @@ impl<'a, const N: usize> TryFrom<&'a str> for InlineString<N> {
     }
 }
 
-impl<const N: usize> TryFrom<String> for InlineString<N> {
+impl<const N: usize> TryFrom<String> for CappedString<N> {
     type Error = Error;
 
     #[inline]
@@ -179,7 +179,7 @@ impl<const N: usize> TryFrom<String> for InlineString<N> {
     }
 }
 
-impl<'a, const N: usize> TryFrom<Cow<'a, str>> for InlineString<N> {
+impl<'a, const N: usize> TryFrom<Cow<'a, str>> for CappedString<N> {
     type Error = Error;
 
     #[inline]
@@ -188,44 +188,44 @@ impl<'a, const N: usize> TryFrom<Cow<'a, str>> for InlineString<N> {
     }
 }
 
-impl<const N: usize> From<InlineString<N>> for String {
+impl<const N: usize> From<CappedString<N>> for String {
     #[inline]
-    fn from(s: InlineString<N>) -> Self {
+    fn from(s: CappedString<N>) -> Self {
         s.into_string()
     }
 }
 
-impl<const N: usize, const M: usize> PartialEq<InlineString<M>> for InlineString<N> {
+impl<const N: usize, const M: usize> PartialEq<CappedString<M>> for CappedString<N> {
     #[inline]
-    fn eq(&self, other: &InlineString<M>) -> bool {
+    fn eq(&self, other: &CappedString<M>) -> bool {
         **self == **other
     }
 }
 
-impl<const N: usize> Eq for InlineString<N> {}
+impl<const N: usize> Eq for CappedString<N> {}
 
-impl<const N: usize, const M: usize> PartialOrd<InlineString<M>> for InlineString<N> {
+impl<const N: usize, const M: usize> PartialOrd<CappedString<M>> for CappedString<N> {
     #[inline]
-    fn partial_cmp(&self, other: &InlineString<M>) -> Option<Ordering> {
+    fn partial_cmp(&self, other: &CappedString<M>) -> Option<Ordering> {
         (**self).partial_cmp(&**other)
     }
 }
 
-impl<const N: usize> Ord for InlineString<N> {
+impl<const N: usize> Ord for CappedString<N> {
     #[inline]
     fn cmp(&self, other: &Self) -> Ordering {
         (**self).cmp(&**other)
     }
 }
 
-impl<const N: usize> Hash for InlineString<N> {
+impl<const N: usize> Hash for CappedString<N> {
     #[inline]
     fn hash<H: Hasher>(&self, state: &mut H) {
         (**self).hash(state);
     }
 }
 
-impl<const N: usize> str::FromStr for InlineString<N> {
+impl<const N: usize> str::FromStr for CappedString<N> {
     type Err = Error;
 
     #[inline]
@@ -234,14 +234,14 @@ impl<const N: usize> str::FromStr for InlineString<N> {
     }
 }
 
-impl<const N: usize> fmt::Debug for InlineString<N> {
+impl<const N: usize> fmt::Debug for CappedString<N> {
     #[inline]
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         fmt::Debug::fmt(&**self, f)
     }
 }
 
-impl<const N: usize> fmt::Display for InlineString<N> {
+impl<const N: usize> fmt::Display for CappedString<N> {
     #[inline]
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         fmt::Display::fmt(&**self, f)
@@ -268,7 +268,7 @@ impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "string of length {} exceeds limit for `InlineString<{}>`",
+            "string of length {} exceeds limit for `CappedString<{}>`",
             self.actual_len,
             self.max_len
         )
