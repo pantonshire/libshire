@@ -3,13 +3,14 @@ use std::{
     convert::Infallible,
     fmt,
     mem::{self, ManuallyDrop, MaybeUninit},
+    num::NonZeroU8,
     ops,
     ptr::{self, addr_of, addr_of_mut},
     slice,
     str,
 };
 
-pub type ShString23 = ShString<23>;
+pub type ShString23 = InliningString<23>;
 
 /// An experimental alternative to `libshire::strings::ShString`, which is able to store one extra
 /// byte of string data on the stack in the same amount of space.
@@ -17,34 +18,35 @@ pub type ShString23 = ShString<23>;
 // `repr(C)` is necessary to ensure that `Repr` starts at offset 0, so that it's properly aligned
 // within the struct.
 #[repr(C)]
-pub struct ShString<const N: usize> {
+pub struct InliningString<const N: usize> {
     repr: Repr<N>,
     // When `len` is less than or equal to `MAX_LEN`, `repr.stack` is active and the first `len`
     // bytes of `repr.stack` contains initialised, valid UTF-8 data. When it is greater than
     // `MAX_LEN`, `repr.heap` is active.
-    len: u8,
+    // len: u8,
+    len: NonZeroU8,
     // A zero-sized field to ensure that `ShString` has an alignment equal to the alignment of
     // `Box<str>`, to ensure that `repr.heap` is properly aligned when it is active.
     _align: [Box<str>; 0],
 }
 
 // `repr(C)` is necessary to ensure that both of the fields start at offset 0. `repr(packed)`
-// reduces the alignment to 1, which allows `ShString` to be more compact.
+// reduces the alignment to 1, which allows `InliningString` to be more compact.
 #[repr(C, packed)]
 union Repr<const N: usize> {
-    stack: [MaybeUninit<u8>; N],
-    heap: ManuallyDrop<MaybeUninit<Box<str>>>,
+    inline: [MaybeUninit<u8>; N],
+    boxed: ManuallyDrop<MaybeUninit<Box<str>>>,
 }
 
-impl<const N: usize> ShString<N> {
+impl<const N: usize> InliningString<N> {
     const MAX_LEN: u8 = {
         #[allow(clippy::cast_possible_truncation, clippy::checked_conversions)]
-        // `MAX_LEN` may be no larger than `u8::MAX - 1` to leave at least one bit pattern to
-        // represent the "stored on the heap" case.
-        if N < u8::MAX as usize {
+        // `MAX_LEN` may be no larger than `u8::MAX - 2` to leave at least one bit pattern to
+        // represent the "boxed" case and at least one bit pattern for the niche optimisation.
+        if N <= (u8::MAX - 2) as usize {
             N as u8
         } else {
-            panic!("`N` must be less than `u8::MAX`")
+            panic!("`N` must be no greater than `u8::MAX - 2`")
         }
     };
 
@@ -82,8 +84,14 @@ impl<const N: usize> ShString<N> {
     /// The first `len` bytes of `buf` must be valid UTF-8. `len` must be less than or equal to
     /// `Self::MAX_LEN` (which is equal to `N`).
     unsafe fn stack_from_raw_parts(buf: [MaybeUninit<u8>; N], len: u8) -> Self {
+        // SAFETY:
+        // The caller is responsible for ensuring that `len` is less than or equal to
+        // `Self::MAX_LEN`, which is no greater than `u8::MAX - 2`. If this contract is upheld,
+        // `len + 1` can never overflow, so `len + 1` can never be zero.
+        let len = NonZeroU8::new_unchecked(len + 1);
+
         Self {
-            repr: Repr { stack: buf },
+            repr: Repr { inline: buf },
             len,
             _align: [],
         }
@@ -93,137 +101,161 @@ impl<const N: usize> ShString<N> {
     where
         Box<str>: From<S>,
     {
+        const U8_NONZERO_MAX: NonZeroU8 = unsafe { NonZeroU8::new_unchecked(u8::MAX) };
+
         Self {
             repr: Repr {
-                heap: ManuallyDrop::new(MaybeUninit::new(Box::from(s))),
+                boxed: ManuallyDrop::new(MaybeUninit::new(Box::from(s))),
             },
-            len: u8::MAX,
+            len: U8_NONZERO_MAX,
             _align: [],
+        }
+    }
+
+    /// If the `inline` field is active, returns the length of the inline string data. If the
+    /// `boxed` field is active, returns `None`.
+    #[inline(always)]
+    fn inline_string_len(&self) -> Option<u8> {
+        let len = self.len.get() - 1;
+        if len <= Self::MAX_LEN {
+            Some(len)
+        } else {
+            None
         }
     }
 
     #[inline]
     #[must_use]
     pub fn as_str(&self) -> &str {
-        if self.heap_allocated() {
-            // SAFETY:
-            // `len` is greater than `Self::MAX_LEN`, which means that the `heap` field is
-            // active. `heap` is properly aligned because it is stored at offset 0 of
-            // `ShString` (since both `ShString` and `Repr` use `repr(C)`), and the alignment
-            // of `ShString` is equal to the alignment of `Box<str>`.
-            let box_str = unsafe { &*addr_of!(self.repr.heap) };
+        match self.inline_string_len() {
+            Some(len) => {
+                // Get a pointer to the `inline` field of the union.
+                // SAFETY:
+                // Since `inline_string_len` returned `Some`, the `inline` field must be active.
+                let ptr = unsafe { addr_of!(self.repr.inline) }
+                    as *const MaybeUninit<u8>
+                    as *const u8;
 
-            unsafe { box_str.assume_init_ref() }
-        } else {
-            // Get a pointer to the `stack` field of the union.
-            // SAFETY:
-            // Since `len` is less no greater than `MAX_LEN`, the `stack` field must be
-            // active.
-            let ptr = unsafe { addr_of!(self.repr.stack) }
-                as *const MaybeUninit<u8>
-                as *const u8;
+                // Construct a byte slice from the pointer to the string data and the length.
+                // SAFETY:
+                // The first `len` bytes of `inline` are always initialised, as this is an
+                // invariant of `InliningString`.
+                let bytes = unsafe { slice::from_raw_parts(ptr, usize::from(len)) };
 
-            // Construct a byte slice from the pointer to the string data and the length.
-            // SAFETY:
-            // The first `len` bytes of `stack` are always initialised, as this is an
-            // invariant of `ShString`.
-            let bytes = unsafe { slice::from_raw_parts(ptr, usize::from(self.len)) };
+                // Perform an unchecked conversion from the byte slice to a string slice.
+                // SAFETY:
+                // The first `len` bytes of `inline` is always valid UTF-8, as this is an
+                // invariant of `InliningString`.
+                unsafe { str::from_utf8_unchecked(bytes) }
+            },
 
-            // Perform an unchecked conversion from the byte slice to a string slice.
-            // SAFETY:
-            // The first `len` bytes of `stack` is always valid UTF-8, as this is an
-            // invariant of `ShString`.
-            unsafe { str::from_utf8_unchecked(bytes) }
+            None => {
+                // SAFETY:
+                // `inline_string_len` returned `None`, which means that the `boxed` field is
+                // active. `boxed` is properly aligned because it is stored at offset 0 of
+                // `InliningString` (since both `InliningString` and `Repr` use `repr(C)`), and the
+                // alignment of `InliningString` is equal to the alignment of `Box<str>`.
+                let box_str = unsafe { &*addr_of!(self.repr.boxed) };
+
+                unsafe { box_str.assume_init_ref() }
+            },
         }
     }
 
     #[inline]
     #[must_use]
     pub fn as_str_mut(&mut self) -> &mut str {
-        if self.heap_allocated() {
-            // SAFETY:
-            // `len` is greater than `Self::MAX_LEN`, which means that the `heap` field is
-            // active. `heap` is properly aligned because it is stored at offset 0 of
-            // `ShString` (since both `ShString` and `Repr` use `repr(C)`), and the alignment
-            // of `ShString` is equal to the alignment of `Box<str>`.
-            let box_str = unsafe { &mut *addr_of_mut!(self.repr.heap) };
+        match self.inline_string_len() {
+            Some(len) => {
+                // Get a pointer to the `inline` field of the union.
+                // SAFETY:
+                // Since `inline_string_len` returned `Some`, the `inline` field must be active.
+                let ptr = unsafe { addr_of_mut!(self.repr.inline) }
+                    as *mut MaybeUninit<u8>
+                    as *mut u8;
 
-            unsafe { box_str.assume_init_mut() }
-        } else {
-            // Get a pointer to the `stack` field of the union.
-            // SAFETY:
-            // Since `len` is less no greater than `MAX_LEN`, the `stack` field must be
-            // active.
-            let ptr = unsafe { addr_of_mut!(self.repr.stack) }
-                as *mut MaybeUninit<u8>
-                as *mut u8;
+                // Construct a byte slice from the pointer to the string data and the length.
+                // SAFETY:
+                // The first `len` bytes of `stack` are always initialised, as this is an
+                // invariant of `ShString`.
+                let bytes = unsafe { slice::from_raw_parts_mut(ptr, usize::from(len)) };
 
-            // Construct a byte slice from the pointer to the string data and the length.
-            // SAFETY:
-            // The first `len` bytes of `stack` are always initialised, as this is an
-            // invariant of `ShString`.
-            let bytes = unsafe { slice::from_raw_parts_mut(ptr, usize::from(self.len)) };
+                // Perform an unchecked conversion from the byte slice to a string slice.
+                // SAFETY:
+                // The first `len` bytes of `inline` is always valid UTF-8, as this is an
+                // invariant of `InliningString`.
+                unsafe { str::from_utf8_unchecked_mut(bytes) }
+            },
 
-            // Perform an unchecked conversion from the byte slice to a string slice.
-            // SAFETY:
-            // The first `len` bytes of `stack` is always valid UTF-8, as this is an
-            // invariant of `ShString`.
-            unsafe { str::from_utf8_unchecked_mut(bytes) }
+            None => {
+                // SAFETY:
+                // `inline_string_len` returned `None`, which means that the `boxed` field is
+                // active. `boxed` is properly aligned because it is stored at offset 0 of
+                // `InliningString` (since both `InliningString` and `Repr` use `repr(C)`), and the
+                // alignment of `InliningString` is equal to the alignment of `Box<str>`.
+                let box_str = unsafe { &mut *addr_of_mut!(self.repr.boxed) };
+
+                unsafe { box_str.assume_init_mut() }
+            },
         }
     }
 
     #[inline]
     #[must_use]
     pub fn into_string(self) -> String {
-        if self.heap_allocated() {
-            // Disable the destructor for `self`; we are transferring ownership of the allocated
-            // memory to the caller, so we don't want to run the drop implementation which would
-            // free the memory.
-            let mut this = ManuallyDrop::new(self);
+        match self.inline_string_len() {
+            Some(len) => {
+                // Get a pointer to the `stack` field of the union.
+                // SAFETY:
+                // Since `len` is less no greater than `MAX_LEN`, the `stack` field must be
+                // active.
+                let ptr = unsafe { addr_of!(self.repr.inline) }
+                    as *const MaybeUninit<u8>
+                    as *const u8;
 
-            // SAFETY:
-            // `len` is greater than `Self::MAX_LEN`, which means that the `heap` field is
-            // active. `heap` is properly aligned because it is stored at offset 0 of
-            // `ShString` (since both `ShString` and `Repr` use `repr(C)`), and the alignment
-            // of `ShString` is equal to the alignment of `Box<str>`.
-            let field_ref = unsafe { &mut *addr_of_mut!(this.repr.heap) };
+                // Construct a byte slice from the pointer to the string data and the length.
+                // SAFETY:
+                // The first `len` bytes of `stack` are always initialised, as this is an
+                // invariant of `ShString`.
+                let bytes = unsafe { slice::from_raw_parts(ptr, usize::from(len)) };
 
-            let manual_box_str = mem::replace(field_ref, ManuallyDrop::new(MaybeUninit::uninit()));
+                // Perform an unchecked conversion from the byte slice to a string slice.
+                // SAFETY:
+                // The first `len` bytes of `stack` is always valid UTF-8, as this is an
+                // invariant of `ShString`.
+                let str_slice = unsafe { str::from_utf8_unchecked(bytes) };
 
-            let maybe_box_str = ManuallyDrop::into_inner(manual_box_str);
+                str_slice.to_owned()
+            },
 
-            let box_str = unsafe { maybe_box_str.assume_init() };
-            
-            box_str.into_string()
-        } else {
-            // Get a pointer to the `stack` field of the union.
-            // SAFETY:
-            // Since `len` is less no greater than `MAX_LEN`, the `stack` field must be
-            // active.
-            let ptr = unsafe { addr_of!(self.repr.stack) }
-                as *const MaybeUninit<u8>
-                as *const u8;
+            None => {
+                // Disable the destructor for `self`; we are transferring ownership of the allocated
+                // memory to the caller, so we don't want to run the drop implementation which would
+                // free the memory.
+                let mut this = ManuallyDrop::new(self);
 
-            // Construct a byte slice from the pointer to the string data and the length.
-            // SAFETY:
-            // The first `len` bytes of `stack` are always initialised, as this is an
-            // invariant of `ShString`.
-            let bytes = unsafe { slice::from_raw_parts(ptr, usize::from(self.len)) };
+                // SAFETY:
+                // `len` is greater than `Self::MAX_LEN`, which means that the `heap` field is
+                // active. `heap` is properly aligned because it is stored at offset 0 of
+                // `ShString` (since both `ShString` and `Repr` use `repr(C)`), and the alignment
+                // of `ShString` is equal to the alignment of `Box<str>`.
+                let field_ref = unsafe { &mut *addr_of_mut!(this.repr.boxed) };
 
-            // Perform an unchecked conversion from the byte slice to a string slice.
-            // SAFETY:
-            // The first `len` bytes of `stack` is always valid UTF-8, as this is an
-            // invariant of `ShString`.
-            let str_slice = unsafe { str::from_utf8_unchecked(bytes) };
+                let manual_box_str = mem::replace(field_ref, ManuallyDrop::new(MaybeUninit::uninit()));
 
-            str_slice.to_owned()
+                let maybe_box_str = ManuallyDrop::into_inner(manual_box_str);
+
+                let box_str = unsafe { maybe_box_str.assume_init() };
+                
+                box_str.into_string()
+            },
         }
     }
 
     #[inline]
     #[must_use]
     pub fn heap_allocated(&self) -> bool {
-        self.len > Self::MAX_LEN
+        self.inline_string_len().is_none()
     }
 
     #[inline]
@@ -239,10 +271,10 @@ impl<const N: usize> ShString<N> {
     }
 }
 
-impl<const N: usize> Drop for ShString<N> {
+impl<const N: usize> Drop for InliningString<N> {
     fn drop(&mut self) {
         if self.heap_allocated() {
-            let heap = unsafe { &mut *addr_of_mut!(self.repr.heap) };
+            let heap = unsafe { &mut *addr_of_mut!(self.repr.boxed) };
 
             // SAFETY:
             // Since this is a drop implementation, `heap` will not be used again after this.
@@ -251,7 +283,7 @@ impl<const N: usize> Drop for ShString<N> {
     }
 }
 
-impl<const N: usize> ops::Deref for ShString<N> {
+impl<const N: usize> ops::Deref for InliningString<N> {
     type Target = str;
 
     #[inline]
@@ -260,63 +292,63 @@ impl<const N: usize> ops::Deref for ShString<N> {
     }
 }
 
-impl<const N: usize> ops::DerefMut for ShString<N> {
+impl<const N: usize> ops::DerefMut for InliningString<N> {
     #[inline]
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.as_str_mut()
     }
 }
 
-impl<const N: usize> AsRef<str> for ShString<N> {
+impl<const N: usize> AsRef<str> for InliningString<N> {
     #[inline]
     fn as_ref(&self) -> &str {
         self
     }
 }
 
-impl<const N: usize> AsMut<str> for ShString<N> {
+impl<const N: usize> AsMut<str> for InliningString<N> {
     #[inline]
     fn as_mut(&mut self) -> &mut str {
         self
     }
 }
 
-impl<const N: usize> borrow::Borrow<str> for ShString<N> {
+impl<const N: usize> borrow::Borrow<str> for InliningString<N> {
     #[inline]
     fn borrow(&self) -> &str {
         self
     }
 }
 
-impl<const N: usize> borrow::BorrowMut<str> for ShString<N> {
+impl<const N: usize> borrow::BorrowMut<str> for InliningString<N> {
     #[inline]
     fn borrow_mut(&mut self) -> &mut str {
         self
     }
 }
 
-impl<'a, const N: usize> From<&'a str> for ShString<N> {
+impl<'a, const N: usize> From<&'a str> for InliningString<N> {
     #[inline]
     fn from(s: &'a str) -> Self {
         Self::new(s)
     }
 }
 
-impl<const N: usize> From<String> for ShString<N> {
+impl<const N: usize> From<String> for InliningString<N> {
     #[inline]
     fn from(s: String) -> Self {
         Self::new(s)
     }
 }
 
-impl<'a, const N: usize> From<Cow<'a, str>> for ShString<N> {
+impl<'a, const N: usize> From<Cow<'a, str>> for InliningString<N> {
     #[inline]
     fn from(s: Cow<'a, str>) -> Self {
         Self::new(s)
     }
 }
 
-impl<const N: usize> str::FromStr for ShString<N> {
+impl<const N: usize> str::FromStr for InliningString<N> {
     type Err = Infallible;
 
     #[inline]
@@ -325,13 +357,13 @@ impl<const N: usize> str::FromStr for ShString<N> {
     }
 }
 
-impl<const N: usize> fmt::Debug for ShString<N> {
+impl<const N: usize> fmt::Debug for InliningString<N> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Debug::fmt(&**self, f)
     }
 }
 
-impl<const N: usize> fmt::Display for ShString<N> {
+impl<const N: usize> fmt::Display for InliningString<N> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Display::fmt(&**self, f)
     }
@@ -346,7 +378,13 @@ mod tests {
     #[test]
     fn test_align() {
         use std::mem::align_of;
-        assert_eq!(align_of::<ShString<23>>(), align_of::<Box<str>>());
+        assert_eq!(align_of::<InliningString<23>>(), align_of::<Box<str>>());
+    }
+
+    #[test]
+    fn test_niche() {
+        use std::mem::size_of;
+        assert_eq!(size_of::<InliningString<23>>(), size_of::<Option<InliningString<23>>>());
     }
 
     #[test]
@@ -427,11 +465,11 @@ mod tests {
 
     #[test]
     fn test_zero_capacity() {
-        assert_eq!(ShString::<0>::new("").as_str(), "");
-        assert!(!ShString::<0>::new("").heap_allocated());
-        assert_eq!(ShString::<0>::new("a").as_str(), "a");
-        assert!(ShString::<0>::new("a").heap_allocated());
-        assert_eq!(ShString::<0>::new("Hello").as_str(), "Hello");
-        assert!(ShString::<0>::new("Hello").heap_allocated());
+        assert_eq!(InliningString::<0>::new("").as_str(), "");
+        assert!(!InliningString::<0>::new("").heap_allocated());
+        assert_eq!(InliningString::<0>::new("a").as_str(), "a");
+        assert!(InliningString::<0>::new("a").heap_allocated());
+        assert_eq!(InliningString::<0>::new("Hello").as_str(), "Hello");
+        assert!(InliningString::<0>::new("Hello").heap_allocated());
     }
 }
