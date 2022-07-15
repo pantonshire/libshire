@@ -1,7 +1,9 @@
 use std::{
     borrow::{self, Cow},
+    cmp::Ordering,
     convert::Infallible,
     fmt,
+    hash::{Hash, Hasher},
     mem::{self, ManuallyDrop, MaybeUninit},
     num::NonZeroU8,
     ops,
@@ -317,6 +319,13 @@ impl<const N: usize> Drop for InliningString<N> {
     }
 }
 
+impl<const N: usize> Default for InliningString<N> {
+    #[inline]
+    fn default() -> Self {
+        Self::empty()
+    }
+}
+
 impl<const N: usize> ops::Deref for InliningString<N> {
     type Target = str;
 
@@ -361,6 +370,15 @@ impl<const N: usize> borrow::BorrowMut<str> for InliningString<N> {
     }
 }
 
+impl<const N: usize> str::FromStr for InliningString<N> {
+    type Err = Infallible;
+
+    #[inline]
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self::new(s))
+    }
+}
+
 impl<'a, const N: usize> From<&'a str> for InliningString<N> {
     #[inline]
     fn from(s: &'a str) -> Self {
@@ -382,12 +400,40 @@ impl<'a, const N: usize> From<Cow<'a, str>> for InliningString<N> {
     }
 }
 
-impl<const N: usize> str::FromStr for InliningString<N> {
-    type Err = Infallible;
-
+impl<const N: usize> From<InliningString<N>> for String {
     #[inline]
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(Self::new(s))
+    fn from(s: InliningString<N>) -> Self {
+        s.into_string()
+    }
+}
+
+impl<const N: usize, const M: usize> PartialEq<InliningString<M>> for InliningString<N> {
+    #[inline]
+    fn eq(&self, other: &InliningString<M>) -> bool {
+        **self == **other
+    }
+}
+
+impl<const N: usize> Eq for InliningString<N> {}
+
+impl<const N: usize, const M: usize> PartialOrd<InliningString<M>> for InliningString<N> {
+    #[inline]
+    fn partial_cmp(&self, other: &InliningString<M>) -> Option<Ordering> {
+        (**self).partial_cmp(&**other)
+    }
+}
+
+impl<const N: usize> Ord for InliningString<N> {
+    #[inline]
+    fn cmp(&self, other: &Self) -> Ordering {
+        (**self).cmp(&**other)
+    }
+}
+
+impl<const N: usize> Hash for InliningString<N> {
+    #[inline]
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        (**self).hash(state);
     }
 }
 
@@ -400,6 +446,27 @@ impl<const N: usize> fmt::Debug for InliningString<N> {
 impl<const N: usize> fmt::Display for InliningString<N> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Display::fmt(&**self, f)
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<const N: usize> serde::Serialize for InliningString<N> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer
+    {
+        serde::Serialize::serialize(&**self, serializer)
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de, const N: usize> serde::Deserialize<'de> for InliningString<N> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>
+    {
+        serde::Deserialize::deserialize(deserializer)
+            .map(Self::new::<&'de str>)
     }
 }
 
