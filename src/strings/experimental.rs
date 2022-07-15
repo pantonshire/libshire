@@ -10,7 +10,7 @@ use std::{
     str,
 };
 
-pub type ShString23 = InliningString<23>;
+pub type InliningString23 = InliningString<23>;
 
 /// An experimental alternative to `libshire::strings::ShString`, which is able to store one extra
 /// byte of string data on the stack in the same amount of space.
@@ -61,11 +61,26 @@ impl<const N: usize> InliningString<N> {
         match u8::try_from(src.len()) {
             Ok(len) if len <= Self::MAX_LEN => {
                 unsafe {
+                    // SAFETY:
+                    // `MaybeUninit::uninit()` is a valid value for `[MaybeUninit<u8>; N]`, since
+                    // each element of the array is allowed to be uninitialised.
                     let mut buf = MaybeUninit::<[MaybeUninit<u8>; N]>::uninit()
                         .assume_init();
 
+                    // Cast the byte slice to a `MaybeUninit<u8>` pointer. This is valid because
+                    // `u8` has the same memory layout as `MaybeUninit<u8>`.
                     let src_ptr = src.as_ptr() as *const MaybeUninit<u8>;
 
+                    // Copy the string data provided by the caller into the buffer.
+                    // SAFETY:
+                    // The source is valid because the source and length are both taken from a
+                    // valid `&[u8]`. We have already checked in the match statement that there is
+                    // enough space in the buffer to fit the string data (i.e. `len` is less than
+                    // or equal to `MAX_LEN`, which is equal to `N`), so the destination is valid.
+                    // The source and destination are trivially properly aligned because the
+                    // alignment of `MaybeUninit<u8>` is 1. The source and destination do not
+                    // overlap; the destination buffer is a new variable completely separate from
+                    // the source data.
                     ptr::copy_nonoverlapping(src_ptr, buf.as_mut_ptr(), usize::from(len));
 
                     // SAFETY:
@@ -80,9 +95,27 @@ impl<const N: usize> InliningString<N> {
         }
     }
 
+    #[inline]
+    #[must_use]
+    pub fn empty() -> Self {
+        unsafe {
+            // SAFETY:
+            // `MaybeUninit::uninit()` is a valid value for `[MaybeUninit<u8>; N]`, since each
+            // element of the array is allowed to be uninitialised.
+            let buf = MaybeUninit::<[MaybeUninit<u8>; N]>::uninit()
+                .assume_init();
+
+            // SAFETY:
+            // `len` is 0, so the contract that the first `len` bytes of `buf` are initialised and
+            // valid UTF-8 is trivially upheld.
+            Self::stack_from_raw_parts(buf, 0)
+        }
+    }
+
     /// # Safety
-    /// The first `len` bytes of `buf` must be valid UTF-8. `len` must be less than or equal to
-    /// `Self::MAX_LEN` (which is equal to `N`).
+    /// The first `len` bytes of `buf` must be initialised and valid UTF-8. `len` must be less than
+    /// or equal to `Self::MAX_LEN` (which is equal to `N`).
+    #[inline]
     unsafe fn stack_from_raw_parts(buf: [MaybeUninit<u8>; N], len: u8) -> Self {
         // SAFETY:
         // The caller is responsible for ensuring that `len` is less than or equal to
@@ -97,6 +130,7 @@ impl<const N: usize> InliningString<N> {
         }
     }
 
+    #[inline]
     fn new_heap<S>(s: S) -> Self
     where
         Box<str>: From<S>,
@@ -378,13 +412,20 @@ mod tests {
     #[test]
     fn test_align() {
         use std::mem::align_of;
-        assert_eq!(align_of::<InliningString<23>>(), align_of::<Box<str>>());
+        assert_eq!(align_of::<InliningString23>(), align_of::<Box<str>>());
     }
 
     #[test]
     fn test_niche() {
         use std::mem::size_of;
-        assert_eq!(size_of::<InliningString<23>>(), size_of::<Option<InliningString<23>>>());
+        assert_eq!(size_of::<InliningString23>(), size_of::<Option<InliningString23>>());
+    }
+
+    #[test]
+    fn test_empty() {
+        assert_eq!(InliningString23::empty().as_str(), "");
+        assert_eq!(InliningString23::empty().len(), 0);
+        assert!(!InliningString23::empty().heap_allocated());
     }
 
     #[test]
@@ -404,20 +445,20 @@ mod tests {
             let borrowed = Cow::Borrowed(s);
             let owned = Cow::<'static, str>::Owned(buf.clone());
 
-            assert_eq!(ShString23::new(s).as_str(), s);
-            assert_eq!(ShString23::new(buf).as_str(), s);
-            assert_eq!(ShString23::new(borrowed).as_str(), s);
-            assert_eq!(ShString23::new(owned).as_str(), s);
+            assert_eq!(InliningString23::new(s).as_str(), s);
+            assert_eq!(InliningString23::new(buf).as_str(), s);
+            assert_eq!(InliningString23::new(borrowed).as_str(), s);
+            assert_eq!(InliningString23::new(owned).as_str(), s);
         }
     }
 
     #[test]
     fn test_as_str_mut() {
-        let mut s1 = ShString23::new("hello");
+        let mut s1 = InliningString23::new("hello");
         s1.as_str_mut().make_ascii_uppercase();
         assert_eq!(s1.as_str(), "HELLO");
 
-        let mut s2 = ShString23::new("the quick brown fox jumps over the lazy dog");
+        let mut s2 = InliningString23::new("the quick brown fox jumps over the lazy dog");
         s2.as_str_mut().make_ascii_uppercase();
         assert_eq!(s2.as_str(), "THE QUICK BROWN FOX JUMPS OVER THE LAZY DOG");
     }
@@ -435,32 +476,32 @@ mod tests {
         ];
 
         for s in test_strings {
-            assert_eq!(ShString23::new(&*s).into_string(), s);
+            assert_eq!(InliningString23::new(&*s).into_string(), s);
         }
     }
 
     #[test]
     fn test_len() {
-        assert_eq!(ShString23::new("").len(), 0);
-        assert_eq!(ShString23::new("Hello").len(), 5);
-        assert_eq!(ShString23::new("Somethingfortheweekend").len(), 22);
-        assert_eq!(ShString23::new("Dichlorodifluoromethane").len(), 23);
-        assert_eq!(ShString23::new("Electrocardiographically").len(), 24);
-        assert_eq!(ShString23::new("こんにちは").len(), 15);
-        assert_eq!(ShString23::new("❤️🧡💛💚💙💜").len(), 26);
+        assert_eq!(InliningString23::new("").len(), 0);
+        assert_eq!(InliningString23::new("Hello").len(), 5);
+        assert_eq!(InliningString23::new("Somethingfortheweekend").len(), 22);
+        assert_eq!(InliningString23::new("Dichlorodifluoromethane").len(), 23);
+        assert_eq!(InliningString23::new("Electrocardiographically").len(), 24);
+        assert_eq!(InliningString23::new("こんにちは").len(), 15);
+        assert_eq!(InliningString23::new("❤️🧡💛💚💙💜").len(), 26);
     }
 
     #[test]
     fn test_heap_allocated() {
-        assert!(!ShString23::new("").heap_allocated());
-        assert!(!ShString23::new("Hello").heap_allocated());
-        assert!(!ShString23::new("Somethingfortheweekend").heap_allocated());
-        assert!(!ShString23::new("Dichlorodifluoromethane").heap_allocated());
-        assert!(!ShString23::new("こんにちは").heap_allocated());
+        assert!(!InliningString23::new("").heap_allocated());
+        assert!(!InliningString23::new("Hello").heap_allocated());
+        assert!(!InliningString23::new("Somethingfortheweekend").heap_allocated());
+        assert!(!InliningString23::new("Dichlorodifluoromethane").heap_allocated());
+        assert!(!InliningString23::new("こんにちは").heap_allocated());
 
-        assert!(ShString23::new("Electrocardiographically").heap_allocated());
-        assert!(ShString23::new("Squishedbuginsidethescreen").heap_allocated());
-        assert!(ShString23::new("❤️🧡💛💚💙💜").heap_allocated());
+        assert!(InliningString23::new("Electrocardiographically").heap_allocated());
+        assert!(InliningString23::new("Squishedbuginsidethescreen").heap_allocated());
+        assert!(InliningString23::new("❤️🧡💛💚💙💜").heap_allocated());
     }
 
     #[test]
