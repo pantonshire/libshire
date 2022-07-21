@@ -1,4 +1,4 @@
-use std::convert::Infallible;
+use core::convert::Infallible;
 
 /// Consumes an element of type `Infallible` and produces an element of any type `T`. This is
 /// possible because `Infallible` has no elements and thus this function can never be called, so

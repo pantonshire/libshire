@@ -1,5 +1,9 @@
 #!/bin/bash
 
+cargo miri test --no-default-features --features serde
+
+cargo miri test --no-default-features --features alloc,serde
+
 cargo miri test
 
 # 32-bit target

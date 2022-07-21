@@ -3,5 +3,10 @@ name = "libshire"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+default = ["std", "serde"]
+alloc = ["serde?/alloc"]
+std = ["serde?/std"]
+
 [dependencies]
 serde = { version = "1", default-features = false, optional = true }

@@ -1,4 +1,4 @@
-use std::{error, fmt, str};
+use core::{fmt, str};
 
 use crate::{hex, strings::FixedString};
 
@@ -222,7 +222,8 @@ impl fmt::Display for ParseError {
     }
 }
 
-impl error::Error for ParseError {}
+#[cfg(feature = "std")]
+impl std::error::Error for ParseError {}
 
 #[derive(Debug)]
 pub enum UuidV5Error {
@@ -237,7 +238,8 @@ impl fmt::Display for UuidV5Error {
     }
 }
 
-impl error::Error for UuidV5Error {}
+#[cfg(feature = "std")]
+impl std::error::Error for UuidV5Error {}
 
 fn sha1(namespace: [u8; 16], name: &[u8]) -> Result<[u8; 20], UuidV5Error> {
     let (mut h0, mut h1, mut h2, mut h3, mut h4) = (
@@ -410,8 +412,12 @@ impl<'a> Iterator for Sha1ChunkIter<'a> {
 mod tests {
     use super::Uuid;
 
+    #[cfg(any(feature = "alloc", feature = "std"))]
     #[test]
     fn test_uuid_display() {
+        #[cfg(not(feature = "std"))]
+        use alloc::string::ToString;
+
         assert_eq!(
             Uuid::from_bytes([
                 0x12, 0x3e, 0x45, 0x67, 0xe8, 0x9b, 0x12, 0xd3, 0xa4, 0x56, 0x42, 0x66, 0x14, 0x17,

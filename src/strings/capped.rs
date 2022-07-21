@@ -1,12 +1,24 @@
-use std::{
-    borrow::{self, Cow},
+use core::{
+    borrow,
     cmp::Ordering,
-    error,
     fmt,
     hash::{Hash, Hasher},
     ops,
     str,
 };
+
+#[cfg(not(feature = "std"))]
+use core::convert::TryFrom;
+
+#[cfg(all(feature = "alloc", not(feature = "std")))]
+use alloc::{
+    borrow::{Cow, ToOwned},
+    boxed::Box,
+    string::String,
+};
+
+#[cfg(feature = "std")]
+use std::borrow::Cow;
 
 #[derive(Clone)]
 pub struct CappedString<const N: usize> {
@@ -97,16 +109,23 @@ impl<const N: usize> CappedString<N> {
         unsafe { str::from_utf8_unchecked_mut(slice) }
     }
 
-    pub fn into_string(self) -> String {
-        self.as_str().to_owned()
-    }
-
     pub fn len(&self) -> usize {
         usize::from(self.len)
     }
 
     pub fn is_empty(&self) -> bool {
         self.len == 0
+    }
+}
+
+#[cfg(any(feature = "alloc", feature = "std"))]
+impl<const N: usize> CappedString<N> {
+    pub fn into_boxed_str(self) -> Box<str> {
+        self.as_str().into()
+    }
+
+    pub fn into_string(self) -> String {
+        self.as_str().to_owned()
     }
 }
 
@@ -170,6 +189,7 @@ impl<'a, const N: usize> TryFrom<&'a str> for CappedString<N> {
     }
 }
 
+#[cfg(any(feature = "alloc", feature = "std"))]
 impl<const N: usize> TryFrom<String> for CappedString<N> {
     type Error = Error;
 
@@ -179,6 +199,7 @@ impl<const N: usize> TryFrom<String> for CappedString<N> {
     }
 }
 
+#[cfg(any(feature = "alloc", feature = "std"))]
 impl<'a, const N: usize> TryFrom<Cow<'a, str>> for CappedString<N> {
     type Error = Error;
 
@@ -188,6 +209,7 @@ impl<'a, const N: usize> TryFrom<Cow<'a, str>> for CappedString<N> {
     }
 }
 
+#[cfg(any(feature = "alloc", feature = "std"))]
 impl<const N: usize> From<CappedString<N>> for String {
     #[inline]
     fn from(s: CappedString<N>) -> Self {
@@ -275,4 +297,5 @@ impl fmt::Display for Error {
     }
 }
 
-impl error::Error for Error {}
+#[cfg(feature = "std")]
+impl std::error::Error for Error {}

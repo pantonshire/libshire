@@ -1,5 +1,5 @@
-use std::{
-    borrow::{self, Cow},
+use core::{
+    borrow,
     cmp::Ordering,
     convert::Infallible,
     fmt,
@@ -8,12 +8,18 @@ use std::{
     str::FromStr,
 };
 
+#[cfg(not(feature = "std"))]
+use alloc::{borrow::Cow, boxed::Box, string::String};
+
+#[cfg(feature = "std")]
+use std::borrow::Cow;
+
 use super::CappedString;
 
 /// A non-growable string where strings 22 bytes or shorter are stored inline and longer strings
 /// use a separate heap allocation. If maximum inline lengths other than 22 are desired, see the
 /// more general [InliningString].
-/// 
+///
 /// 22 bytes is chosen because it is optimal for 64-bit architectures; the minimum possible size
 /// of the data structure on 64-bit architectures which always keeps the data properly aligned is
 /// 24 bytes (because, when heap-allocated, the data structure contains a 16-byte `Box<[u8]>` with
@@ -24,23 +30,23 @@ pub type InliningString22 = InliningString<22>;
 /// A non-growable string which stores small strings inline; strings of length less than or equal
 /// to `N` are stored inside the data structure itself, whereas strings of length greater than `N`
 /// use a separate heap allocation.
-/// 
+///
 /// This type is intended to be used when lots of small strings need to be stored, and these
 /// strings do not need to grow.
-/// 
+///
 /// For 64-bit targets, `N = 22` allows the greatest amount of inline string data to be stored
 /// without exceeding the size of a regular [String]. Therefore, [InliningString22] is provided as
 /// a type alias for `InliningString<22>`.
-/// 
+///
 /// Although `N` is a `usize`, it may be no greater than `u8::MAX`; larger values will result in a
 /// compile-time error.
-/// 
+///
 /// ```
 /// # use libshire::strings::InliningString;
 /// let s1 = InliningString::<22>::new("Hello, InliningString!");
 /// assert_eq!(&*s1, "Hello, InliningString!");
 /// assert!(!s1.heap_allocated());
-/// 
+///
 /// let s2 = InliningString::<22>::new("This string is 23 bytes");
 /// assert_eq!(&*s2, "This string is 23 bytes");
 /// assert!(s2.heap_allocated());
@@ -51,7 +57,7 @@ pub struct InliningString<const N: usize>(Repr<N>);
 impl<const N: usize> InliningString<N> {
     /// Creates a new `InliningString` from the given string, storing the string data inline if
     /// possible or creating a new heap allocation otherwise.
-    /// 
+    ///
     /// ```
     /// # use libshire::strings::InliningString;
     /// let s = InliningString::<22>::new("Hello, InliningString!");
@@ -71,7 +77,7 @@ impl<const N: usize> InliningString<N> {
     }
 
     /// Returns a new empty `InliningString`.
-    /// 
+    ///
     /// ```
     /// # use libshire::strings::InliningString;
     /// let s = InliningString::<22>::empty();
@@ -103,6 +109,15 @@ impl<const N: usize> InliningString<N> {
         }
     }
 
+    #[inline]
+    #[must_use]
+    pub fn into_boxed_str(self) -> Box<str> {
+        match self {
+            Self(Repr::Inline(buf)) => buf.into_boxed_str(),
+            Self(Repr::Boxed(buf)) => buf,
+        }
+    }
+
     /// Consumes the `InliningString` and converts it to a heap-allocated `String`.
     #[inline]
     #[must_use]
@@ -114,7 +129,7 @@ impl<const N: usize> InliningString<N> {
     }
 
     /// Returns the length of the string in bytes.
-    /// 
+    ///
     /// ```
     /// # use libshire::strings::InliningString;
     /// let s = InliningString::<22>::new("こんにちは");
@@ -130,12 +145,12 @@ impl<const N: usize> InliningString<N> {
     }
 
     /// Returns `true` if the string has length 0.
-    /// 
+    ///
     /// ```
     /// # use libshire::strings::InliningString;
     /// let s1 = InliningString::<22>::new("");
     /// assert!(s1.is_empty());
-    /// 
+    ///
     /// let s2 = InliningString::<22>::new("Hello");
     /// assert!(!s2.is_empty());
     /// ```
@@ -149,12 +164,12 @@ impl<const N: usize> InliningString<N> {
     }
 
     /// Returns `true` if the string data is stored on the heap, and `false` otherwise.
-    /// 
+    ///
     /// ```
     /// # use libshire::strings::InliningString;
     /// let s1 = InliningString::<22>::new("This string's 22 bytes");
     /// assert!(!s1.heap_allocated());
-    /// 
+    ///
     /// let s2 = InliningString::<22>::new("This string is 23 bytes");
     /// assert!(s2.heap_allocated());
     /// ```
@@ -304,7 +319,7 @@ impl<const N: usize> fmt::Display for InliningString<N> {
 impl<const N: usize> serde::Serialize for InliningString<N> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
-        S: serde::Serializer
+        S: serde::Serializer,
     {
         serde::Serialize::serialize(&**self, serializer)
     }
@@ -314,10 +329,9 @@ impl<const N: usize> serde::Serialize for InliningString<N> {
 impl<'de, const N: usize> serde::Deserialize<'de> for InliningString<N> {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
-        D: serde::Deserializer<'de>
+        D: serde::Deserializer<'de>,
     {
-        serde::Deserialize::deserialize(deserializer)
-            .map(Self::new::<&'de str>)
+        serde::Deserialize::deserialize(deserializer).map(Self::new::<Cow<'de, str>>)
     }
 }
 
@@ -329,6 +343,10 @@ enum Repr<const N: usize> {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(not(feature = "std"))]
+    use alloc::borrow::{Cow, ToOwned};
+
+    #[cfg(feature = "std")]
     use std::borrow::Cow;
 
     use super::{InliningString, InliningString22};
@@ -341,7 +359,7 @@ mod tests {
             "Somethingfortheweekend",
             "Dichlorodifluoromethane",
             "こんにちは",
-            "❤️🧡💛💚💙💜"
+            "❤️🧡💛💚💙💜",
         ];
 
         for s in test_strings {

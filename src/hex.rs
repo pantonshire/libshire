@@ -1,5 +1,4 @@
-use std::{
-    error,
+use core::{
     fmt::{self, Write},
     marker::PhantomData,
 };
@@ -215,7 +214,8 @@ impl fmt::Display for ParseError {
     }
 }
 
-impl error::Error for ParseError {}
+#[cfg(feature = "std")]
+impl std::error::Error for ParseError {}
 
 #[derive(Debug)]
 pub enum ArrayParseError {
@@ -232,7 +232,8 @@ impl fmt::Display for ArrayParseError {
     }
 }
 
-impl error::Error for ArrayParseError {}
+#[cfg(feature = "std")]
+impl std::error::Error for ArrayParseError {}
 
 impl From<ParseError> for ArrayParseError {
     fn from(err: ParseError) -> Self {
@@ -244,8 +245,12 @@ impl From<ParseError> for ArrayParseError {
 mod tests {
     use super::*;
 
+    #[cfg(any(feature = "alloc", feature = "std"))]
     #[test]
     fn test_hex_bytes_debug() {
+        #[cfg(not(feature = "std"))]
+        use alloc::format;
+
         assert_eq!(
             format!("{:?}", HexBytes::<Lowercase>::new(&[0x87, 0xe1, 0x8f, 0xaa, 0x88, 0x8d, 0x43, 0x4e, 0xf2, 0xb2, 0x5d, 0xe1, 0xa5, 0x1b, 0xa0, 0x94])),
             "[0x87, 0xe1, 0x8f, 0xaa, 0x88, 0x8d, 0x43, 0x4e, 0xf2, 0xb2, 0x5d, 0xe1, 0xa5, 0x1b, 0xa0, 0x94]"
@@ -257,8 +262,12 @@ mod tests {
         );
     }
 
+    #[cfg(any(feature = "alloc", feature = "std"))]
     #[test]
     fn test_hex_bytes_display() {
+        #[cfg(not(feature = "std"))]
+        use alloc::string::ToString;
+
         assert_eq!(
             HexBytes::<Lowercase>::new(&[0x87, 0xe1, 0x8f, 0xaa, 0x88, 0x8d, 0x43, 0x4e, 0xf2, 0xb2, 0x5d, 0xe1, 0xa5, 0x1b, 0xa0, 0x94]).to_string(),
             "87e18faa888d434ef2b25de1a51ba094"

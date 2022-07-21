@@ -1,5 +1,5 @@
-use std::{
-    borrow::{self, Cow},
+use core::{
+    borrow,
     cmp::Ordering,
     convert::Infallible,
     fmt,
@@ -11,6 +11,16 @@ use std::{
     slice,
     str,
 };
+
+#[cfg(not(feature = "std"))]
+use alloc::{
+    borrow::Cow,
+    boxed::Box,
+    string::String,
+};
+
+#[cfg(feature = "std")]
+use std::borrow::Cow;
 
 /// A non-growable string where strings 23 bytes or shorter are stored inline and longer strings
 /// use a separate heap allocation. If maximum inline lengths other than 23 are desired, see the
@@ -274,7 +284,7 @@ impl<const N: usize> InliningString<N> {
 
     #[inline]
     #[must_use]
-    pub fn into_string(self) -> String {
+    pub fn into_boxed_str(self) -> Box<str> {
         match self.inline_string_len() {
             Some(len) => {
                 // Get a pointer to the `inline` field of the union.
@@ -296,7 +306,7 @@ impl<const N: usize> InliningString<N> {
                 // of `InliningString`.
                 let str_slice = unsafe { str::from_utf8_unchecked(bytes) };
 
-                str_slice.to_owned()
+                Box::from(str_slice)
             },
 
             None => {
@@ -328,11 +338,16 @@ impl<const N: usize> InliningString<N> {
                 // The boxed string is initialised, as we obtained it by moving `repr.boxed`, and
                 // the only time `repr.boxed` is uninitialised is when it is briefly replaced with
                 // a temporary value in the block above.
-                let box_str = unsafe { maybe_box_str.assume_init() };
-                
-                box_str.into_string()
+                unsafe { maybe_box_str.assume_init() }
             },
         }
+    }
+
+    #[inline]
+    #[must_use]
+    pub fn into_string(self) -> String {
+        self.into_boxed_str()
+            .into_string()
     }
 
     #[inline]
@@ -519,19 +534,26 @@ impl<'de, const N: usize> serde::Deserialize<'de> for InliningString<N> {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(not(feature = "std"))]
+    use alloc::{
+        borrow::{Cow, ToOwned},
+        vec::Vec,
+    };
+
+    #[cfg(feature = "std")]
     use std::borrow::Cow;
 
     use super::*;
 
     #[test]
     fn test_align() {
-        use std::mem::align_of;
+        use core::mem::align_of;
         assert_eq!(align_of::<InliningString23>(), align_of::<Box<str>>());
     }
 
     #[test]
     fn test_niche() {
-        use std::mem::size_of;
+        use core::mem::size_of;
         assert_eq!(size_of::<InliningString23>(), size_of::<Option<InliningString23>>());
     }
 

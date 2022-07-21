@@ -1,7 +1,6 @@
-use std::{
+use core::{
     borrow,
     cmp::Ordering,
-    error,
     fmt,
     hash::{Hash, Hasher},
     ops,
@@ -191,7 +190,8 @@ impl fmt::Display for Error {
     }
 }
 
-impl error::Error for Error {}
+#[cfg(feature = "std")]
+impl std::error::Error for Error {}
 
 #[cfg(test)]
 mod tests {

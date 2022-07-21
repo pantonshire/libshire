@@ -1,9 +1,8 @@
-use std::{
+use core::{
     convert::identity,
     fmt,
     hint,
     ops::{Deref, DerefMut},
-    process::{ExitCode, Termination},
 };
 
 use crate::convert::{clone, clone_mut, copy, copy_mut, Empty};
@@ -586,14 +585,15 @@ where
     }
 }
 
-impl<L, R> Termination for Either<L, R>
+#[cfg(feature = "std")]
+impl<L, R> std::process::Termination for Either<L, R>
 where
-    L: Termination,
-    R: Termination,
+    L: std::process::Termination,
+    R: std::process::Termination,
 {
     #[inline]
-    fn report(self) -> ExitCode {
-        self.fold(<L as Termination>::report, <R as Termination>::report)
+    fn report(self) -> std::process::ExitCode {
+        self.fold(<L as std::process::Termination>::report, <R as std::process::Termination>::report)
     }
 }
 
