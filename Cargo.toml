@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [features]
-default = ["std", "serde"]
+default = ["std"]
 alloc = ["serde?/alloc"]
 std = ["serde?/std"]
 
