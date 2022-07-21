@@ -12,20 +12,48 @@ use std::{
     str,
 };
 
+/// A non-growable string where strings 23 bytes or shorter are stored inline and longer strings
+/// use a separate heap allocation. If maximum inline lengths other than 23 are desired, see the
+/// more general [InliningString].
+/// 
+/// 23 bytes is chosen because it is optimal for 64-bit architectures; the minimum possible size
+/// of the data structure on 64-bit architectures which always keeps the data properly aligned is
+/// 24 bytes (because, when heap-allocated, the data structure contains a 16-byte `Box<[u8]>` with
+/// 8-byte alignment and a 1-byte discriminant, and the greatest multiple of 8 which is ≥17 is 24),
+/// so there is space for 23 bytes of string data plus the 1-byte discriminant.
 pub type InliningString23 = InliningString<23>;
 
-/// An experimental alternative to `libshire::strings::InliningString`, which is able to store one
-/// extra byte of inline string data in the same amount of space.
-
-// `repr(C)` is necessary to ensure that `Repr` starts at offset 0, so that it's properly aligned
-// within the struct.
+/// A non-growable string which stores small strings inline; strings of length less than or equal
+/// to `N` are stored inside the data structure itself, whereas strings of length greater than `N`
+/// use a separate heap allocation.
+/// 
+/// This type is intended to be used when lots of small strings need to be stored, and these
+/// strings do not need to grow.
+/// 
+/// For 64-bit targets, `N = 23` allows the greatest amount of inline string data to be stored
+/// without exceeding the size of a regular [String]. Therefore, [InliningString23] is provided as
+/// a type alias for `InliningString<23>`.
+/// 
+/// Although `N` is a `usize`, it may be no greater than `u8::MAX`; larger values will result in a
+/// compile-time error.
+/// 
+/// ```
+/// # use libshire::strings::InliningString;
+/// let s1 = InliningString::<23>::new("This string is 23 bytes");
+/// assert_eq!(&*s1, "This string is 23 bytes");
+/// assert!(!s1.heap_allocated());
+/// 
+/// let s2 = InliningString::<23>::new("and this one is 24 bytes");
+/// assert_eq!(&*s2, "and this one is 24 bytes");
+/// assert!(s2.heap_allocated());
+/// ```
 #[repr(C)]
 pub struct InliningString<const N: usize> {
     repr: Repr<N>,
-    // When `len` is less than or equal to `MAX_LEN`, `repr.inline` is active and the first `len`
-    // bytes of `repr.inline` contains initialised, valid UTF-8 data. When it is greater than
-    // `MAX_LEN`, `repr.boxed` is active.
-    // len: u8,
+    // When `len - 1` is less than or equal to `MAX_LEN`, `repr.inline` is active and the first
+    // `len - 1` bytes of `repr.inline` contains initialised, valid UTF-8 data. When `len - 1` is
+    // greater than `MAX_LEN`, `repr.boxed` is active. `NonZeroU8` is used to allow for the niche
+    // optimisation (https://rust-lang.github.io/unsafe-code-guidelines/glossary.html#niche).
     len: NonZeroU8,
     // A zero-sized field to ensure that `InliningString` has an alignment equal to the alignment
     // of `Box<str>`, to ensure that `repr.boxed` is properly aligned when it is active.
@@ -535,6 +563,30 @@ mod tests {
             assert_eq!(InliningString23::new(buf).as_str(), s);
             assert_eq!(InliningString23::new(borrowed).as_str(), s);
             assert_eq!(InliningString23::new(owned).as_str(), s);
+        }
+    }
+
+    #[test]
+    fn test_contiguous() {
+        let test_strings = [
+            "",
+            "Hello",
+            "Somethingfortheweekend",
+            "Dichlorodifluoromethane",
+            "Electrocardiographically",
+            "こんにちは",
+            "❤️🧡💛💚💙💜",
+        ];
+
+        #[allow(clippy::needless_collect)]
+        let vec = test_strings
+            .iter()
+            .copied()
+            .map(InliningString23::new)
+            .collect::<Vec<_>>();
+
+        for (i, s) in vec.into_iter().enumerate() {
+            assert_eq!(s.as_str(), test_strings[i]);
         }
     }
 
