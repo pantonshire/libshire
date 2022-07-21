@@ -5,7 +5,7 @@ use core::{
     fmt,
     hash::{Hash, Hasher},
     ops,
-    str::{self, from_utf8},
+    str,
 };
 
 #[cfg(not(feature = "std"))]
@@ -348,32 +348,20 @@ impl<'de, const N: usize> serde::Deserialize<'de> for InliningString<N> {
             }
 
             fn visit_str<E: Error>(self, v: &str) -> Result<Self::Value, E> {
-                #[cfg(feature = "std")] {
-                    println!("visit &str \"{}\"", v);
-                }
                 Ok(Self::Value::new(v))
             }
 
             fn visit_string<E: Error>(self, v: String) -> Result<Self::Value, E> {
-                #[cfg(feature = "std")] {
-                    println!("visit String \"{}\"", v);
-                }
                 Ok(Self::Value::new(v))
             }
 
             fn visit_bytes<E: Error>(self, v: &[u8]) -> Result<Self::Value, E> {
-                #[cfg(feature = "std")] {
-                    println!("visit &[u8] {:?}", v);
-                }
                 str::from_utf8(v)
                     .map(Self::Value::new)
                     .map_err(|_| Error::invalid_value(Unexpected::Bytes(v), &self))
             }
 
             fn visit_byte_buf<E: Error>(self, v: Vec<u8>) -> Result<Self::Value, E> {
-                #[cfg(feature = "std")] {
-                    println!("visit Vec<u8> {:?}", v);
-                }
                 String::from_utf8(v)
                     .map(Self::Value::new)
                     .map_err(|err| {

@@ -527,8 +527,41 @@ impl<'de, const N: usize> serde::Deserialize<'de> for InliningString<N> {
     where
         D: serde::Deserializer<'de>
     {
-        serde::Deserialize::deserialize(deserializer)
-            .map(Self::new::<&'de str>)
+        use serde::de::{Error, Unexpected, Visitor};
+
+        struct InliningStringVisitor<const N: usize>;
+
+        impl<'de, const N: usize> Visitor<'de> for InliningStringVisitor<N> {
+            type Value = InliningString<N>;
+
+            fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                f.write_str("a string")
+            }
+
+            fn visit_str<E: Error>(self, v: &str) -> Result<Self::Value, E> {
+                Ok(Self::Value::new(v))
+            }
+
+            fn visit_string<E: Error>(self, v: String) -> Result<Self::Value, E> {
+                Ok(Self::Value::new(v))
+            }
+
+            fn visit_bytes<E: Error>(self, v: &[u8]) -> Result<Self::Value, E> {
+                str::from_utf8(v)
+                    .map(Self::Value::new)
+                    .map_err(|_| Error::invalid_value(Unexpected::Bytes(v), &self))
+            }
+
+            fn visit_byte_buf<E: Error>(self, v: Vec<u8>) -> Result<Self::Value, E> {
+                String::from_utf8(v)
+                    .map(Self::Value::new)
+                    .map_err(|err| {
+                        Error::invalid_value(Unexpected::Bytes(&err.into_bytes()), &self)
+                    })
+            }
+        }
+
+        deserializer.deserialize_string(InliningStringVisitor)
     }
 }
 
