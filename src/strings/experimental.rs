@@ -16,11 +16,17 @@ use core::{
 use alloc::{
     borrow::Cow,
     boxed::Box,
+    rc::Rc,
     string::String,
+    sync::Arc,
 };
 
 #[cfg(feature = "std")]
-use std::borrow::Cow;
+use std::{
+    borrow::Cow,
+    rc::Rc,
+    sync::Arc,
+};
 
 /// A non-growable string where strings 23 bytes or shorter are stored inline and longer strings
 /// use a separate heap allocation. If maximum inline lengths other than 23 are desired, see the
@@ -455,6 +461,13 @@ impl<const N: usize> From<String> for InliningString<N> {
     }
 }
 
+impl<const N: usize> From<Box<str>> for InliningString<N> {
+    #[inline]
+    fn from(s: Box<str>) -> Self {
+        Self::new(s)
+    }
+}
+
 impl<'a, const N: usize> From<Cow<'a, str>> for InliningString<N> {
     #[inline]
     fn from(s: Cow<'a, str>) -> Self {
@@ -466,6 +479,27 @@ impl<const N: usize> From<InliningString<N>> for String {
     #[inline]
     fn from(s: InliningString<N>) -> Self {
         s.into_string()
+    }
+}
+
+impl<const N: usize> From<InliningString<N>> for Box<str> {
+    #[inline]
+    fn from(s: InliningString<N>) -> Self {
+        s.into_boxed_str()
+    }
+}
+
+impl<const N: usize> From<InliningString<N>> for Rc<str> {
+    #[inline]
+    fn from(s: InliningString<N>) -> Self {
+        Rc::from(s.into_boxed_str())
+    }
+}
+
+impl<const N: usize> From<InliningString<N>> for Arc<str> {
+    #[inline]
+    fn from(s: InliningString<N>) -> Self {
+        Arc::from(s.into_boxed_str())
     }
 }
 
@@ -527,6 +561,9 @@ impl<'de, const N: usize> serde::Deserialize<'de> for InliningString<N> {
     where
         D: serde::Deserializer<'de>
     {
+        #[cfg(not(feature = "std"))]
+        use alloc::vec::Vec;
+
         use serde::de::{Error, Unexpected, Visitor};
 
         struct InliningStringVisitor<const N: usize>;
