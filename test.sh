@@ -1,13 +1,15 @@
 #!/bin/bash
+set -e
+set -o pipefail
 
-cargo miri test --no-default-features --features serde
+cargo +nightly miri test --no-default-features --features serde
 
-cargo miri test --no-default-features --features alloc,serde
+cargo +nightly miri test --no-default-features --features alloc,serde
 
-cargo miri test
+cargo +nightly miri test
 
 # 32-bit target
-cargo miri test --target sparc-unknown-linux-gnu
+cargo +nightly miri test --target sparc-unknown-linux-gnu
 
 # Big-endian target
-cargo miri test --target mips64-unknown-linux-gnuabi64
+cargo +nightly miri test --target mips64-unknown-linux-gnuabi64
