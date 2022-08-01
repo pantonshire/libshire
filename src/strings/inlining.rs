@@ -66,11 +66,12 @@ pub type InliningString23 = InliningString<23>;
 #[repr(C)]
 pub struct InliningString<const N: usize> {
     repr: Repr<N>,
-    // When `len - 1` is less than or equal to `MAX_LEN`, `repr.inline` is active and the first
-    // `len - 1` bytes of `repr.inline` contains initialised, valid UTF-8 data. When `len - 1` is
-    // greater than `MAX_LEN`, `repr.boxed` is active. `NonZeroU8` is used to allow for the niche
-    // optimisation (https://rust-lang.github.io/unsafe-code-guidelines/glossary.html#niche).
-    len: NonZeroU8,
+    // When `discrim - 1` is less than or equal to `MAX_LEN`, `repr.inline` is active and the first
+    // `discrim - 1` bytes of `repr.inline` contains initialised, valid UTF-8 data. When
+    // `discrim - 1` is greater than `MAX_LEN`, `repr.boxed` is active. `NonZeroU8` is used to
+    // allow for the niche optimisation
+    // (https://rust-lang.github.io/unsafe-code-guidelines/glossary.html#niche).
+    discrim: NonZeroU8,
     // A zero-sized field to ensure that `InliningString` has an alignment equal to the alignment
     // of `Box<str>`, to ensure that `repr.boxed` is properly aligned when it is active.
     _align: [Box<str>; 0],
@@ -182,11 +183,11 @@ impl<const N: usize> InliningString<N> {
         // The caller is responsible for ensuring that `len` is less than or equal to
         // `Self::MAX_LEN`, which is no greater than `u8::MAX - 2`. If this contract is upheld,
         // `len + 1` can never overflow, so `len + 1` can never be zero.
-        let len = NonZeroU8::new_unchecked(len + 1);
+        let discrim = NonZeroU8::new_unchecked(len + 1);
 
         Self {
             repr: Repr { inline: buf },
-            len,
+            discrim,
             _align: [],
         }
     }
@@ -202,7 +203,7 @@ impl<const N: usize> InliningString<N> {
             repr: Repr {
                 boxed: ManuallyDrop::new(MaybeUninit::new(Box::from(s))),
             },
-            len: U8_NONZERO_MAX,
+            discrim: U8_NONZERO_MAX,
             _align: [],
         }
     }
@@ -211,7 +212,7 @@ impl<const N: usize> InliningString<N> {
     /// `boxed` field is active, returns `None`.
     #[inline(always)]
     fn inline_string_len(&self) -> Option<u8> {
-        let len = self.len.get() - 1;
+        let len = self.discrim.get() - 1;
         if len <= Self::MAX_LEN {
             Some(len)
         } else {
@@ -227,7 +228,7 @@ impl<const N: usize> InliningString<N> {
                 // Get a pointer to the `inline` field of the union.
                 // SAFETY:
                 // Since `inline_string_len` returned `Some`, the `inline` field must be active.
-                let ptr = unsafe { addr_of!(self.repr.inline) }
+                let inline_buf_ptr = unsafe { addr_of!(self.repr.inline) }
                     as *const MaybeUninit<u8>
                     as *const u8;
 
@@ -235,13 +236,13 @@ impl<const N: usize> InliningString<N> {
                 // SAFETY:
                 // The first `len` bytes of `inline` are always initialised, as this is an
                 // invariant of `InliningString`.
-                let bytes = unsafe { slice::from_raw_parts(ptr, usize::from(len)) };
+                let inline_buf_slice = unsafe { slice::from_raw_parts(inline_buf_ptr, usize::from(len)) };
 
                 // Perform an unchecked conversion from the byte slice to a string slice.
                 // SAFETY:
                 // The first `len` bytes of `inline` is always valid UTF-8, as this is an invariant
                 // of `InliningString`.
-                unsafe { str::from_utf8_unchecked(bytes) }
+                unsafe { str::from_utf8_unchecked(inline_buf_slice) }
             },
 
             None => {
@@ -250,13 +251,13 @@ impl<const N: usize> InliningString<N> {
                 // active. `boxed` is properly aligned because it is stored at offset 0 of
                 // `InliningString` (since both `InliningString` and `Repr` use `repr(C)`), and the
                 // alignment of `InliningString` is equal to the alignment of `Box<str>`.
-                let box_str = unsafe { &*addr_of!(self.repr.boxed) };
+                let maybe_boxed_buf = unsafe { &*addr_of!(self.repr.boxed) };
 
                 // SAFETY:
                 // `repr.boxed` is initialised, as the only time it's uninitialised is when it is
                 // briefly replaced with a temporary value before the `InliningString` is dropped
                 // in the `into_string` function.
-                unsafe { box_str.assume_init_ref() }
+                unsafe { maybe_boxed_buf.assume_init_ref() }
             },
         }
     }
@@ -269,7 +270,7 @@ impl<const N: usize> InliningString<N> {
                 // Get a pointer to the `inline` field of the union.
                 // SAFETY:
                 // Since `inline_string_len` returned `Some`, the `inline` field must be active.
-                let ptr = unsafe { addr_of_mut!(self.repr.inline) }
+                let inline_buf_ptr = unsafe { addr_of_mut!(self.repr.inline) }
                     as *mut MaybeUninit<u8>
                     as *mut u8;
 
@@ -277,13 +278,13 @@ impl<const N: usize> InliningString<N> {
                 // SAFETY:
                 // The first `len` bytes of `inline` are always initialised, as this is an
                 // invariant of `InliningString`.
-                let bytes = unsafe { slice::from_raw_parts_mut(ptr, usize::from(len)) };
+                let inline_buf_slice = unsafe { slice::from_raw_parts_mut(inline_buf_ptr, usize::from(len)) };
 
                 // Perform an unchecked conversion from the byte slice to a string slice.
                 // SAFETY:
                 // The first `len` bytes of `inline` is always valid UTF-8, as this is an invariant
                 // of `InliningString`.
-                unsafe { str::from_utf8_unchecked_mut(bytes) }
+                unsafe { str::from_utf8_unchecked_mut(inline_buf_slice) }
             },
 
             None => {
@@ -292,13 +293,13 @@ impl<const N: usize> InliningString<N> {
                 // active. `boxed` is properly aligned because it is stored at offset 0 of
                 // `InliningString` (since both `InliningString` and `Repr` use `repr(C)`), and the
                 // alignment of `InliningString` is equal to the alignment of `Box<str>`.
-                let box_str = unsafe { &mut *addr_of_mut!(self.repr.boxed) };
+                let maybe_boxed_buf = unsafe { &mut *addr_of_mut!(self.repr.boxed) };
 
                 // SAFETY:
                 // `repr.boxed` is initialised, as the only time it's uninitialised is when it is
                 // briefly replaced with a temporary value before the `InliningString` is dropped
                 // in the `into_string` function.
-                unsafe { box_str.assume_init_mut() }
+                unsafe { maybe_boxed_buf.assume_init_mut() }
             },
         }
     }
@@ -311,7 +312,7 @@ impl<const N: usize> InliningString<N> {
                 // Get a pointer to the `inline` field of the union.
                 // SAFETY:
                 // Since `inline_string_len` returned `Some`, the `inline` field must be active.
-                let ptr = unsafe { addr_of!(self.repr.inline) }
+                let inline_buf_ptr = unsafe { addr_of!(self.repr.inline) }
                     as *const MaybeUninit<u8>
                     as *const u8;
 
@@ -319,19 +320,19 @@ impl<const N: usize> InliningString<N> {
                 // SAFETY:
                 // The first `len` bytes of `inline` are always initialised, as this is an
                 // invariant of `InliningString`.
-                let bytes = unsafe { slice::from_raw_parts(ptr, usize::from(len)) };
+                let inline_buf_slice = unsafe { slice::from_raw_parts(inline_buf_ptr, usize::from(len)) };
 
                 // Perform an unchecked conversion from the byte slice to a string slice.
                 // SAFETY:
                 // The first `len` bytes of `inline` is always valid UTF-8, as this is an invariant
                 // of `InliningString`.
-                let str_slice = unsafe { str::from_utf8_unchecked(bytes) };
+                let str_slice = unsafe { str::from_utf8_unchecked(inline_buf_slice) };
 
                 Box::from(str_slice)
             },
 
             None => {
-                let manual_box_str = {
+                let manual_boxed_buf = {
                     // Disable the destructor for `self`; we are transferring ownership of the
                     // allocated memory to the caller, so we don't want to run the destructor which
                     // would free the memory.
@@ -353,13 +354,13 @@ impl<const N: usize> InliningString<N> {
                 };
 
                 // Re-enable the destructor for the boxed string.
-                let maybe_box_str = ManuallyDrop::into_inner(manual_box_str);
+                let maybe_boxed_buf = ManuallyDrop::into_inner(manual_boxed_buf);
 
                 // SAFETY:
                 // The boxed string is initialised, as we obtained it by moving `repr.boxed`, and
                 // the only time `repr.boxed` is uninitialised is when it is briefly replaced with
                 // a temporary value in the block above.
-                unsafe { maybe_box_str.assume_init() }
+                unsafe { maybe_boxed_buf.assume_init() }
             },
         }
     }
@@ -420,11 +421,46 @@ impl<const N: usize> InliningString<N> {
 impl<const N: usize> Drop for InliningString<N> {
     fn drop(&mut self) {
         if self.heap_allocated() {
-            let boxed = unsafe { &mut *addr_of_mut!(self.repr.boxed) };
+            let boxed_buf = unsafe { &mut *addr_of_mut!(self.repr.boxed) };
 
             // SAFETY:
             // Since this is a drop implementation, `boxed` will not be used again after this.
-            let _ = unsafe { ManuallyDrop::take(boxed).assume_init() };
+            let _ = unsafe { ManuallyDrop::take(boxed_buf).assume_init() };
+        }
+    }
+}
+
+impl<const N: usize> Clone for InliningString<N> {
+    fn clone(&self) -> Self {
+        match self.inline_string_len() {
+            Some(len) => {
+                // SAFETY:
+                // Since `inline_string_len` returned `Some`, the `inline` field must be active.
+                let inline_buf_copy = unsafe { *addr_of!(self.repr.inline) };
+
+                // SAFETY:
+                // The first `len` bytes of the buffer are initialised and valid UTF-8, as this is
+                // an invariant of the `InliningString` from which the buffer and length were 
+                // copied.
+                unsafe { Self::inline_from_raw_parts(inline_buf_copy, len) }
+            },
+
+            None => {
+                // SAFETY:
+                // `inline_string_len` returned `None`, which means that the `boxed` field is
+                // active. `boxed` is properly aligned because it is stored at offset 0 of
+                // `InliningString` (since both `InliningString` and `Repr` use `repr(C)`), and the
+                // alignment of `InliningString` is equal to the alignment of `Box<str>`.
+                let maybe_boxed_buf = unsafe { &*addr_of!(self.repr.boxed) };
+
+                // SAFETY:
+                // `repr.boxed` is initialised, as the only time it's uninitialised is when it is
+                // briefly replaced with a temporary value before the `InliningString` is dropped
+                // in the `into_string` function.
+                let boxed_buf = unsafe { maybe_boxed_buf.assume_init_ref() };
+
+                Self::new_boxed(boxed_buf.clone())
+            },
         }
     }
 }
@@ -725,12 +761,40 @@ mod tests {
     }
 
     #[test]
+    fn test_clone() {
+        let s1 = InliningString23::new("hello");
+        assert!(!s1.heap_allocated());
+        let s1_clone = s1.clone();
+        assert_eq!(s1, s1_clone);
+        assert_eq!(s1.as_str(), "hello");
+        assert_ne!(s1.as_str().as_ptr(), s1_clone.as_str().as_ptr());
+
+        let s2 = InliningString23::new("the quick brown fox jumps over the lazy dog");
+        assert!(s2.heap_allocated());
+        let s2_clone = s2.clone();
+        assert_eq!(s2, s2_clone);
+        assert_ne!(s1, s2_clone);
+        assert_ne!(s1_clone, s2_clone);
+        assert_eq!(s2.as_str(), "the quick brown fox jumps over the lazy dog");
+        assert_ne!(s2.as_str().as_ptr(), s2_clone.as_str().as_ptr());
+
+        let s3 = InliningString23::empty();
+        assert!(!s3.heap_allocated());
+        let s3_clone = s3.clone();
+        assert_eq!(s3, s3_clone);
+        assert_eq!(s3.as_str(), "");
+        assert_ne!(s3.as_str().as_ptr(), s3_clone.as_str().as_ptr());
+    }
+
+    #[test]
     fn test_as_str_mut() {
         let mut s1 = InliningString23::new("hello");
+        assert!(!s1.heap_allocated());
         s1.as_str_mut().make_ascii_uppercase();
         assert_eq!(s1.as_str(), "HELLO");
 
         let mut s2 = InliningString23::new("the quick brown fox jumps over the lazy dog");
+        assert!(s2.heap_allocated());
         s2.as_str_mut().make_ascii_uppercase();
         assert_eq!(s2.as_str(), "THE QUICK BROWN FOX JUMPS OVER THE LAZY DOG");
     }
