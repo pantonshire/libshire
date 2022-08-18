@@ -1,6 +1,6 @@
 use core::{fmt, str};
 
-use crate::{hex, strings::FixedString};
+use crate::{encoding::hex, strings::FixedString};
 
 // TODO: make conformity to RFC 4122 an invariant of this type (which means it cannot be created
 // safely from an arbitrary [u8; 16]).
