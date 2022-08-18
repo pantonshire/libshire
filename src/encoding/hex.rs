@@ -85,7 +85,7 @@ impl<E: Encode> fmt::Display for HexByte<E> {
     }
 }
 
-pub trait Encode {
+pub trait Encode: sealed::Sealed {
     fn byte_to_hex(byte: u8) -> (u8, u8);
 }
 
@@ -105,6 +105,13 @@ impl Encode for Uppercase {
     fn byte_to_hex(byte: u8) -> (u8, u8) {
         byte_to_hex_upper(byte)
     }
+}
+
+mod sealed {
+    pub trait Sealed {}
+    
+    impl Sealed for super::Lowercase {}
+    impl Sealed for super::Uppercase {}
 }
 
 /// Converts the given byte to its lowercase hexadecimal representation. The first byte returned
