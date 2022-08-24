@@ -1,7 +1,9 @@
 use core::{
-    fmt::{self, Write},
+    fmt,
     marker::PhantomData,
 };
+
+use crate::strings::FixedString;
 
 #[derive(Clone, Copy)]
 #[repr(transparent)]
@@ -70,30 +72,25 @@ impl<E> HexByte<E> {
 
 impl<E: Encode> fmt::Debug for HexByte<E> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let [b0, b1] = <E as Encode>::byte_to_hex(self.inner);
-        f.write_str("0x")
-            .and_then(|_| f.write_char(char::from(b0)))
-            .and_then(|_| f.write_char(char::from(b1)))
+        write!(f, "0x{}", <E as Encode>::byte_to_hex(self.inner))
     }
 }
 
 impl<E: Encode> fmt::Display for HexByte<E> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let [b0, b1] = <E as Encode>::byte_to_hex(self.inner);
-        f.write_char(char::from(b0))
-            .and_then(|_| f.write_char(char::from(b1)))
+        fmt::Display::fmt(&<E as Encode>::byte_to_hex(self.inner), f)
     }
 }
 
 pub trait Encode: sealed::Sealed {
-    fn byte_to_hex(byte: u8) -> [u8; 2];
+    fn byte_to_hex(byte: u8) -> FixedString<2>;
 }
 
 pub struct Lowercase;
 
 impl Encode for Lowercase {
     #[inline]
-    fn byte_to_hex(byte: u8) -> [u8; 2] {
+    fn byte_to_hex(byte: u8) -> FixedString<2> {
         byte_to_hex_lower(byte)
     }
 }
@@ -102,7 +99,7 @@ pub struct Uppercase;
 
 impl Encode for Uppercase {
     #[inline]
-    fn byte_to_hex(byte: u8) -> [u8; 2] {
+    fn byte_to_hex(byte: u8) -> FixedString<2> {
         byte_to_hex_upper(byte)
     }
 }
@@ -114,21 +111,28 @@ mod sealed {
     impl Sealed for super::Uppercase {}
 }
 
-/// Converts the given byte to its lowercase hexadecimal representation. The first byte returned
+/// Converts the given byte to its lowercase hexadecimal representation. The first character
 /// encodes the most significant 4 bits, and the second byte encodes the least significant 4 bits.
 ///
 /// ```
 /// # use libshire::encoding::hex::byte_to_hex_lower;
-/// assert_eq!(byte_to_hex_lower(15), (b'0', b'f'));
-/// assert_eq!(byte_to_hex_lower(139), (b'8', b'b'));
+/// assert_eq!(&*byte_to_hex_lower(15), "0f");
+/// assert_eq!(&*byte_to_hex_lower(139), "8b");
 /// ```
 #[inline]
 #[must_use]
-pub fn byte_to_hex_lower(byte: u8) -> [u8; 2] {
-    [
-        nybble_to_hex_lower(byte >> 4),
-        nybble_to_hex_lower(byte & 0xF),
-    ]
+pub fn byte_to_hex_lower(byte: u8) -> FixedString<2> {
+    // SAFETY:
+    // `nybble_to_hex_lower` always retruns a valid ASCII character, provided that the input value
+    // is less than 16. `byte >> 4` and `byte & 0xF` are both always less than 16, since only the 4
+    // least significant bits can possibly be set. Any sequence of valid ASCII characters is valid
+    // UTF-8, so the array is valid UTF-8.
+    unsafe {
+        FixedString::from_raw_array([
+            nybble_to_hex_lower(byte >> 4),
+            nybble_to_hex_lower(byte & 0xF),
+        ])
+    }
 }
 
 /// Returns the ASCII byte corresponding to the given hex nybble, using lowercase for the digits A
@@ -141,21 +145,28 @@ fn nybble_to_hex_lower(nybble: u8) -> u8 {
     }
 }
 
-/// Converts the given byte to its uppercase hexadecimal representation. The first byte returned
+/// Converts the given byte to its uppercase hexadecimal representation. The first character
 /// encodes the most significant 4 bits, and the second byte encodes the least significant 4 bits.
 ///
 /// ```
 /// # use libshire::encoding::hex::byte_to_hex_upper;
-/// assert_eq!(byte_to_hex_upper(15), (b'0', b'F'));
-/// assert_eq!(byte_to_hex_upper(139), (b'8', b'B'));
+/// assert_eq!(&*byte_to_hex_upper(15), "0F");
+/// assert_eq!(&*byte_to_hex_upper(139), "8B");
 /// ```
 #[inline]
 #[must_use]
-pub fn byte_to_hex_upper(byte: u8) -> [u8; 2] {
-    [
-        nybble_to_hex_upper(byte >> 4),
-        nybble_to_hex_upper(byte & 0xF),
-    ]
+pub fn byte_to_hex_upper(byte: u8) -> FixedString<2> {
+    // SAFETY:
+    // `nybble_to_hex_upper` always retruns a valid ASCII character, provided that the input value
+    // is less than 16. `byte >> 4` and `byte & 0xF` are both always less than 16, since only the 4
+    // least significant bits can possibly be set. Any sequence of valid ASCII characters is valid
+    // UTF-8, so the array is valid UTF-8.
+    unsafe {
+        FixedString::from_raw_array([
+            nybble_to_hex_upper(byte >> 4),
+            nybble_to_hex_upper(byte & 0xF),
+        ])
+    }
 }
 
 /// Returns the ASCII byte corresponding to the given hex nybble, using uppercase for the digits A
@@ -328,28 +339,28 @@ mod tests {
 
     #[test]
     fn test_byte_to_hex_lower() {
-        assert_eq!(byte_to_hex_lower(0x00), [b'0', b'0']);
-        assert_eq!(byte_to_hex_lower(0x01), [b'0', b'1']);
-        assert_eq!(byte_to_hex_lower(0x0F), [b'0', b'f']);
-        assert_eq!(byte_to_hex_lower(0x10), [b'1', b'0']);
-        assert_eq!(byte_to_hex_lower(0x1F), [b'1', b'f']);
-        assert_eq!(byte_to_hex_lower(0x9A), [b'9', b'a']);
-        assert_eq!(byte_to_hex_lower(0xA9), [b'a', b'9']);
-        assert_eq!(byte_to_hex_lower(0xF0), [b'f', b'0']);
-        assert_eq!(byte_to_hex_lower(0xFF), [b'f', b'f']);
+        assert_eq!(&*byte_to_hex_lower(0x00), "00");
+        assert_eq!(&*byte_to_hex_lower(0x01), "01");
+        assert_eq!(&*byte_to_hex_lower(0x0F), "0f");
+        assert_eq!(&*byte_to_hex_lower(0x10), "10");
+        assert_eq!(&*byte_to_hex_lower(0x1F), "1f");
+        assert_eq!(&*byte_to_hex_lower(0x9A), "9a");
+        assert_eq!(&*byte_to_hex_lower(0xA9), "a9");
+        assert_eq!(&*byte_to_hex_lower(0xF0), "f0");
+        assert_eq!(&*byte_to_hex_lower(0xFF), "ff");
     }
 
     #[test]
     fn test_byte_to_hex_upper() {
-        assert_eq!(byte_to_hex_upper(0x00), [b'0', b'0']);
-        assert_eq!(byte_to_hex_upper(0x01), [b'0', b'1']);
-        assert_eq!(byte_to_hex_upper(0x0F), [b'0', b'F']);
-        assert_eq!(byte_to_hex_upper(0x10), [b'1', b'0']);
-        assert_eq!(byte_to_hex_upper(0x1F), [b'1', b'F']);
-        assert_eq!(byte_to_hex_upper(0x9A), [b'9', b'A']);
-        assert_eq!(byte_to_hex_upper(0xA9), [b'A', b'9']);
-        assert_eq!(byte_to_hex_upper(0xF0), [b'F', b'0']);
-        assert_eq!(byte_to_hex_upper(0xFF), [b'F', b'F']);
+        assert_eq!(&*byte_to_hex_upper(0x00), "00");
+        assert_eq!(&*byte_to_hex_upper(0x01), "01");
+        assert_eq!(&*byte_to_hex_upper(0x0F), "0F");
+        assert_eq!(&*byte_to_hex_upper(0x10), "10");
+        assert_eq!(&*byte_to_hex_upper(0x1F), "1F");
+        assert_eq!(&*byte_to_hex_upper(0x9A), "9A");
+        assert_eq!(&*byte_to_hex_upper(0xA9), "A9");
+        assert_eq!(&*byte_to_hex_upper(0xF0), "F0");
+        assert_eq!(&*byte_to_hex_upper(0xFF), "FF");
     }
 
     #[test]

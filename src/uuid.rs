@@ -75,7 +75,7 @@ impl Uuid {
         let mut buf = [0u8; 36];
 
         for (i, byte) in self.0.iter().copied().enumerate() {
-            let [b0, b1] = hex::byte_to_hex_lower(byte);
+            let [b0, b1] = hex::byte_to_hex_lower(byte).into_raw();
             let offset = match i {
                 0..=3 => 0,
                 4..=5 => 1,
