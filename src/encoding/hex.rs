@@ -118,7 +118,7 @@ mod sealed {
 /// encodes the most significant 4 bits, and the second byte encodes the least significant 4 bits.
 ///
 /// ```
-/// # use libshire::hex::byte_to_hex_lower;
+/// # use libshire::encoding::hex::byte_to_hex_lower;
 /// assert_eq!(byte_to_hex_lower(15), (b'0', b'f'));
 /// assert_eq!(byte_to_hex_lower(139), (b'8', b'b'));
 /// ```
@@ -145,7 +145,7 @@ fn nybble_to_hex_lower(nybble: u8) -> u8 {
 /// encodes the most significant 4 bits, and the second byte encodes the least significant 4 bits.
 ///
 /// ```
-/// # use libshire::hex::byte_to_hex_upper;
+/// # use libshire::encoding::hex::byte_to_hex_upper;
 /// assert_eq!(byte_to_hex_upper(15), (b'0', b'F'));
 /// assert_eq!(byte_to_hex_upper(139), (b'8', b'B'));
 /// ```
