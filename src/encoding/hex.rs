@@ -179,23 +179,26 @@ fn nybble_to_hex_upper(nybble: u8) -> u8 {
     }
 }
 
-pub fn hex_to_be_byte_array<const N: usize>(hex: &str) -> Result<[u8; N], ArrayParseError> {
-    let mut iter = hex.chars().rev();
+pub fn hex_to_be_byte_array<const N: usize, B>(hex: &B) -> Result<[u8; N], ArrayParseError>
+where
+    B: AsRef<[u8]> + ?Sized,
+{
+    let mut iter = hex.as_ref().iter().copied().rev();
     let mut buf = [0u8; N];
     let mut bytes = 0usize;
 
-    while let Some(ch0) = iter.next() {
+    while let Some(lsb) = iter.next() {
         bytes += 1;
         if bytes > N {
             return Err(ArrayParseError::TooLong(N))
         }
 
         match iter.next() {
-            Some(ch1) => {
-                buf[N - bytes] = hex_to_byte(ch1, ch0)?;
+            Some(msb) => {
+                buf[N - bytes] = hex_to_byte(msb, lsb)?;
             },
             None => {
-                buf[N - bytes] = hex_to_nybble(ch0)?;
+                buf[N - bytes] = hex_to_nybble(lsb)?;
                 return Ok(buf);
             },
         }
@@ -205,23 +208,23 @@ pub fn hex_to_be_byte_array<const N: usize>(hex: &str) -> Result<[u8; N], ArrayP
 }
 
 #[inline]
-pub fn hex_to_byte(ch0: char, ch1: char) -> Result<u8, ParseError> {
-    Ok((hex_to_nybble(ch0)? << 4) | hex_to_nybble(ch1)?)
+pub fn hex_to_byte(msb: u8, lsb: u8) -> Result<u8, ParseError> {
+    Ok((hex_to_nybble(msb)? << 4) | hex_to_nybble(lsb)?)
 }
 
 #[inline]
-fn hex_to_nybble(ch: char) -> Result<u8, ParseError> {
-    match ch {
-        '0'..='9' => Ok((ch as u8) - 0x30),
-        'A'..='F' => Ok((ch as u8) - 0x37),
-        'a'..='f' => Ok((ch as u8) - 0x57),
-        ch => Err(ParseError::BadChar(ch)),
+fn hex_to_nybble(byte: u8) -> Result<u8, ParseError> {
+    match byte {
+        b'0'..=b'9' => Ok(byte - 0x30),
+        b'A'..=b'F' => Ok(byte - 0x37),
+        b'a'..=b'f' => Ok(byte - 0x57),
+        byte => Err(ParseError::BadChar(byte)),
     }
 }
 
 #[derive(Debug)]
 pub enum ParseError {
-    BadChar(char),
+    BadChar(u8),
 }
 
 impl fmt::Display for ParseError {
@@ -263,7 +266,7 @@ impl From<ParseError> for ArrayParseError {
 mod tests {
     use super::*;
 
-    #[cfg(any(feature = "alloc", feature = "std"))]
+    #[cfg(feature = "alloc")]
     #[test]
     fn test_hex_bytes_debug() {
         #[cfg(not(feature = "std"))]
@@ -280,7 +283,7 @@ mod tests {
         );
     }
 
-    #[cfg(any(feature = "alloc", feature = "std"))]
+    #[cfg(feature = "alloc")]
     #[test]
     fn test_hex_bytes_display() {
         #[cfg(not(feature = "std"))]
@@ -365,31 +368,31 @@ mod tests {
 
     #[test]
     fn test_hex_to_nybble() {
-        assert_eq!(hex_to_nybble('0').unwrap(), 0x0);
-        assert_eq!(hex_to_nybble('1').unwrap(), 0x1);
-        assert_eq!(hex_to_nybble('2').unwrap(), 0x2);
-        assert_eq!(hex_to_nybble('3').unwrap(), 0x3);
-        assert_eq!(hex_to_nybble('4').unwrap(), 0x4);
-        assert_eq!(hex_to_nybble('5').unwrap(), 0x5);
-        assert_eq!(hex_to_nybble('6').unwrap(), 0x6);
-        assert_eq!(hex_to_nybble('7').unwrap(), 0x7);
-        assert_eq!(hex_to_nybble('8').unwrap(), 0x8);
-        assert_eq!(hex_to_nybble('9').unwrap(), 0x9);
-        assert_eq!(hex_to_nybble('a').unwrap(), 0xa);
-        assert_eq!(hex_to_nybble('b').unwrap(), 0xb);
-        assert_eq!(hex_to_nybble('c').unwrap(), 0xc);
-        assert_eq!(hex_to_nybble('d').unwrap(), 0xd);
-        assert_eq!(hex_to_nybble('e').unwrap(), 0xe);
-        assert_eq!(hex_to_nybble('f').unwrap(), 0xf);
-        assert_eq!(hex_to_nybble('A').unwrap(), 0xa);
-        assert_eq!(hex_to_nybble('B').unwrap(), 0xb);
-        assert_eq!(hex_to_nybble('C').unwrap(), 0xc);
-        assert_eq!(hex_to_nybble('D').unwrap(), 0xd);
-        assert_eq!(hex_to_nybble('E').unwrap(), 0xe);
-        assert_eq!(hex_to_nybble('F').unwrap(), 0xf);
+        assert_eq!(hex_to_nybble(b'0').unwrap(), 0x0);
+        assert_eq!(hex_to_nybble(b'1').unwrap(), 0x1);
+        assert_eq!(hex_to_nybble(b'2').unwrap(), 0x2);
+        assert_eq!(hex_to_nybble(b'3').unwrap(), 0x3);
+        assert_eq!(hex_to_nybble(b'4').unwrap(), 0x4);
+        assert_eq!(hex_to_nybble(b'5').unwrap(), 0x5);
+        assert_eq!(hex_to_nybble(b'6').unwrap(), 0x6);
+        assert_eq!(hex_to_nybble(b'7').unwrap(), 0x7);
+        assert_eq!(hex_to_nybble(b'8').unwrap(), 0x8);
+        assert_eq!(hex_to_nybble(b'9').unwrap(), 0x9);
+        assert_eq!(hex_to_nybble(b'a').unwrap(), 0xa);
+        assert_eq!(hex_to_nybble(b'b').unwrap(), 0xb);
+        assert_eq!(hex_to_nybble(b'c').unwrap(), 0xc);
+        assert_eq!(hex_to_nybble(b'd').unwrap(), 0xd);
+        assert_eq!(hex_to_nybble(b'e').unwrap(), 0xe);
+        assert_eq!(hex_to_nybble(b'f').unwrap(), 0xf);
+        assert_eq!(hex_to_nybble(b'A').unwrap(), 0xa);
+        assert_eq!(hex_to_nybble(b'B').unwrap(), 0xb);
+        assert_eq!(hex_to_nybble(b'C').unwrap(), 0xc);
+        assert_eq!(hex_to_nybble(b'D').unwrap(), 0xd);
+        assert_eq!(hex_to_nybble(b'E').unwrap(), 0xe);
+        assert_eq!(hex_to_nybble(b'F').unwrap(), 0xf);
 
-        assert!(matches!(hex_to_nybble('g'), Err(ParseError::BadChar('g'))));
-        assert!(matches!(hex_to_nybble('G'), Err(ParseError::BadChar('G'))));
+        assert!(matches!(hex_to_nybble(b'g'), Err(ParseError::BadChar(b'g'))));
+        assert!(matches!(hex_to_nybble(b'G'), Err(ParseError::BadChar(b'G'))));
     }
 
     #[test]
@@ -414,7 +417,7 @@ mod tests {
         );
 
         assert!(matches!(
-            hex_to_be_byte_array::<5>("d90058decebf"),
+            hex_to_be_byte_array::<5, _>("d90058decebf"),
             Err(ArrayParseError::TooLong(5))
         ));
     }

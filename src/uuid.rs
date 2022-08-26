@@ -133,19 +133,19 @@ impl str::FromStr for Uuid {
         let mut buf = [0u8; 16];
 
         buf[..4].copy_from_slice(
-            &hex::hex_to_be_byte_array::<4>(groups[0]).map_err(ParseError::BadTimeLow)?,
+            &hex::hex_to_be_byte_array::<4, _>(groups[0]).map_err(ParseError::BadTimeLow)?,
         );
         buf[4..6].copy_from_slice(
-            &hex::hex_to_be_byte_array::<2>(groups[1]).map_err(ParseError::BadTimeMid)?,
+            &hex::hex_to_be_byte_array::<2, _>(groups[1]).map_err(ParseError::BadTimeMid)?,
         );
         buf[6..8].copy_from_slice(
-            &hex::hex_to_be_byte_array::<2>(groups[2]).map_err(ParseError::BadTimeHi)?,
+            &hex::hex_to_be_byte_array::<2, _>(groups[2]).map_err(ParseError::BadTimeHi)?,
         );
         buf[8..10].copy_from_slice(
-            &hex::hex_to_be_byte_array::<2>(groups[3]).map_err(ParseError::BadClockSeq)?,
+            &hex::hex_to_be_byte_array::<2, _>(groups[3]).map_err(ParseError::BadClockSeq)?,
         );
         buf[10..].copy_from_slice(
-            &hex::hex_to_be_byte_array::<6>(groups[4]).map_err(ParseError::BadNode)?,
+            &hex::hex_to_be_byte_array::<6, _>(groups[4]).map_err(ParseError::BadNode)?,
         );
 
         Ok(Self::from_bytes(buf))
@@ -412,7 +412,7 @@ impl<'a> Iterator for Sha1ChunkIter<'a> {
 mod tests {
     use super::Uuid;
 
-    #[cfg(any(feature = "alloc", feature = "std"))]
+    #[cfg(feature = "alloc")]
     #[test]
     fn test_uuid_display() {
         #[cfg(not(feature = "std"))]

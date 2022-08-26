@@ -118,7 +118,7 @@ impl<const N: usize> CappedString<N> {
     }
 }
 
-#[cfg(any(feature = "alloc", feature = "std"))]
+#[cfg(feature = "alloc")]
 impl<const N: usize> CappedString<N> {
     pub fn into_boxed_str(self) -> Box<str> {
         self.as_str().into()
@@ -189,7 +189,7 @@ impl<'a, const N: usize> TryFrom<&'a str> for CappedString<N> {
     }
 }
 
-#[cfg(any(feature = "alloc", feature = "std"))]
+#[cfg(feature = "alloc")]
 impl<const N: usize> TryFrom<String> for CappedString<N> {
     type Error = Error;
 
@@ -199,7 +199,7 @@ impl<const N: usize> TryFrom<String> for CappedString<N> {
     }
 }
 
-#[cfg(any(feature = "alloc", feature = "std"))]
+#[cfg(feature = "alloc")]
 impl<'a, const N: usize> TryFrom<Cow<'a, str>> for CappedString<N> {
     type Error = Error;
 
@@ -209,7 +209,7 @@ impl<'a, const N: usize> TryFrom<Cow<'a, str>> for CappedString<N> {
     }
 }
 
-#[cfg(any(feature = "alloc", feature = "std"))]
+#[cfg(feature = "alloc")]
 impl<const N: usize> From<CappedString<N>> for String {
     #[inline]
     fn from(s: CappedString<N>) -> Self {
