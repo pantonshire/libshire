@@ -112,6 +112,15 @@ where
     }
 }
 
+#[cfg(feature = "alloc")]
+pub fn percent_encode_to_buf<B>(buf: &mut String, bytes: &B)
+where
+    B: AsRef<[u8]> + ?Sized,
+{
+    percent_encode_to_fmt_writer(buf, bytes)
+        .expect("writing to a String should never return an error")
+}
+
 pub fn percent_encode_to_fmt_writer<W, B>(writer: &mut W, bytes: &B) -> fmt::Result
 where
     W: Write + ?Sized,
