@@ -1,2 +1,2 @@
 pub mod hex;
-pub mod rfc3986;
+pub mod url;
