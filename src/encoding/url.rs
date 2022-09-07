@@ -117,6 +117,18 @@ impl<'a> Iterator for PercentEncoder<'a> {
     }
 }
 
+/// Percent-encodes the given sequence of bytes. The return type is `Cow<str>`; if there are
+/// characters which require percent-encoding then a new `String` will be allocated, otherwise
+/// there will be no new allocation.
+/// 
+/// Note that spaces `b' '` will be encoded as `"%20"` rather than `"+"`, in order to be compliant
+/// with [RFC 3986](https://datatracker.ietf.org/doc/html/rfc3986#section-2.1).
+/// 
+/// ```
+/// # use libshire::encoding::url::percent_encode;
+/// assert_eq!(&*percent_encode("hello, world!"), "hello%2C%20world%21");
+/// assert_eq!(&*percent_encode("🤖"), "%F0%9F%A4%96");
+/// ```
 #[cfg(feature = "alloc")]
 #[must_use]
 pub fn percent_encode<B>(bytes: &B) -> Cow<str>
@@ -147,6 +159,17 @@ where
     }
 }
 
+/// Percent-encodes the given sequence of bytes, pushing the result to the given `String`.
+/// 
+/// Note that spaces `b' '` will be encoded as `"%20"` rather than `"+"`, in order to be compliant
+/// with [RFC 3986](https://datatracker.ietf.org/doc/html/rfc3986#section-2.1).
+/// 
+/// ```
+/// # use libshire::encoding::url::percent_encode_to_buf;
+/// let mut buf = String::new();
+/// percent_encode_to_buf(&mut buf, "hello, world!");
+/// assert_eq!(&*buf, "hello%2C%20world%21");
+/// ```
 #[cfg(feature = "alloc")]
 pub fn percent_encode_to_buf<B>(buf: &mut String, bytes: &B)
 where
@@ -158,6 +181,12 @@ where
     result_elim(percent_encode_to(sink, bytes))
 }
 
+/// Percent-encodes the given sequence of bytes, pushing the result to the given [StrSink]. For
+/// example, anything which implements `std::fmt::Write` also implements `StrSink` and can therefore
+/// be used here.
+/// 
+/// Note that spaces `b' '` will be encoded as `"%20"` rather than `"+"`, in order to be compliant
+/// with [RFC 3986](https://datatracker.ietf.org/doc/html/rfc3986#section-2.1).
 pub fn percent_encode_to<S, B>(sink: &mut S, bytes: &B) -> Result<(), S::Error>
 where
     S: StrSink + ?Sized,
@@ -276,10 +305,13 @@ impl<T: PercentDecodeMode> PercentDecodeMode for &T {}
 #[cfg(feature = "alloc")]
 impl<T: PercentDecodeMode> PercentDecodeMode for Box<T> {}
 
+/// A [PercentDecodeMode] where plus characters `b'+'` are not replaced with spaces.
 pub struct StandardDecode;
 
 impl PercentDecodeMode for StandardDecode {}
 
+/// A [PercentDecodeMode] where plus characters `b'+'` are replaced with spaces, as required by the
+/// application/x-www-form-urlencoded format.
 pub struct FormDecode;
 
 impl PercentDecodeMode for FormDecode {}
