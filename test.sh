@@ -2,17 +2,15 @@
 set -e
 set -o pipefail
 
-# no_std and no alloc
-cargo +nightly miri test --no-default-features --features serde
+TEST_RUNS=(
+    '--no-default-features --features serde'
+    '--no-default-features --features alloc,serde'
+    '--features serde'
+    '--target sparc-unknown-linux-gnu --features serde'
+    '--target mips64-unknown-linux-gnuabi64 --features serde'
+)
 
-# no_std with alloc
-cargo +nightly miri test --no-default-features --features alloc,serde
-
-# std
-cargo +nightly miri test --features serde
-
-# 32-bit target
-cargo +nightly miri test --target sparc-unknown-linux-gnu --features serde
-
-# Big-endian target
-cargo +nightly miri test --target mips64-unknown-linux-gnuabi64 --features serde
+for FLAGS in "${TEST_RUNS[@]}"
+do
+    cargo +nightly miri test $FLAGS
+done
