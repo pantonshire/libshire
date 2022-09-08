@@ -24,7 +24,9 @@ impl<const N: usize> FixedString<N> {
     #[inline]
     pub unsafe fn from_raw_slice(bytes: &[u8]) -> Result<Self, Error> {
         match bytes.try_into() {
-            Ok(bytes) => Ok(Self::from_raw_array(bytes)),
+            // SAFETY:
+            // The caller is reponsible for ensuring that the provided bytes are valid UTF-8.
+            Ok(bytes) => unsafe { Ok(Self::from_raw_array(bytes)) },
             Err(_) => Err(Error {
                 expected_len: N,
                 actual_len: bytes.len(),

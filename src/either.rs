@@ -332,7 +332,7 @@ impl<L, R> Either<L, R> {
             Inl(l) => l,
             // SAFETY:
             // The caller is responsible for ensuring that the value is not `Inr`.
-            Inr(_) => hint::unreachable_unchecked(),
+            Inr(_) => unsafe { hint::unreachable_unchecked() },
         }
     }
 
@@ -343,7 +343,7 @@ impl<L, R> Either<L, R> {
         match self {
             // SAFETY:
             // The caller is responsible for ensuring that the value is not `Inl`.
-            Inl(_) => hint::unreachable_unchecked(),
+            Inl(_) => unsafe { hint::unreachable_unchecked() },
             Inr(r) => r,
         }
     }

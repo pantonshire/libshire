@@ -183,7 +183,7 @@ impl<const N: usize> InliningString<N> {
         // The caller is responsible for ensuring that `len` is less than or equal to
         // `Self::MAX_LEN`, which is no greater than `u8::MAX - 2`. If this contract is upheld,
         // `len + 1` can never overflow, so `len + 1` can never be zero.
-        let discrim = NonZeroU8::new_unchecked(len + 1);
+        let discrim = unsafe { NonZeroU8::new_unchecked(len + 1) };
 
         Self {
             repr: Repr { inline: buf },
