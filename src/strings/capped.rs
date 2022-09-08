@@ -20,6 +20,17 @@ use alloc::{
 #[cfg(feature = "std")]
 use std::borrow::Cow;
 
+/// A string type which stores at most `N` bytes of string data. The string data is stored inline
+/// rather than using a heap allocation.
+/// 
+/// ```
+/// # use libshire::strings::CappedString;
+/// # fn main() -> Result<(), libshire::strings::capped::Error> {
+/// let s = CappedString::<16>::new("hello world")?;
+/// assert_eq!(&*s, "hello world");
+/// # Ok(())
+/// # }
+/// ```
 #[derive(Clone)]
 pub struct CappedString<const N: usize> {
     buf: [u8; N],
@@ -48,6 +59,14 @@ impl<const N: usize> CappedString<N> {
     }
 
     /// Returns a new empty `CappedString`.
+    /// 
+    /// ```
+    /// # use libshire::strings::CappedString;
+    /// let s = CappedString::<8>::empty();
+    /// assert!(s.is_empty());
+    /// assert_eq!(s.len(), 0);
+    /// assert_eq!(&*s, "");
+    /// ```
     #[inline]
     #[must_use]
     pub const fn empty() -> Self {
@@ -57,6 +76,18 @@ impl<const N: usize> CappedString<N> {
         unsafe { Self::from_raw_parts([0; N], 0) }
     }
 
+    /// Returns a new `CappedString` containing the given string data. The string data will be
+    /// stored inline; no heap allocation is used. An error will be returned if the length of the
+    /// provided string exceeds the `CappedString`'s maximum length, `N`.
+    /// 
+    /// ```
+    /// # use libshire::strings::CappedString;
+    /// # fn main() -> Result<(), libshire::strings::capped::Error> {
+    /// let s = CappedString::<16>::new("hello world")?;
+    /// assert_eq!(&*s, "hello world");
+    /// # Ok(())
+    /// # }
+    /// ```
     #[inline]
     pub fn new<S>(s: &S) -> Result<Self, Error>
     where
