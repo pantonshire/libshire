@@ -200,6 +200,16 @@ impl<const N: usize> TryFrom<String> for CappedString<N> {
 }
 
 #[cfg(feature = "alloc")]
+impl<const N: usize> TryFrom<Box<str>> for CappedString<N> {
+    type Error = Error;
+
+    #[inline]
+    fn try_from(s: Box<str>) -> Result<Self, Self::Error> {
+        Self::new(&s)
+    }
+}
+
+#[cfg(feature = "alloc")]
 impl<'a, const N: usize> TryFrom<Cow<'a, str>> for CappedString<N> {
     type Error = Error;
 
@@ -214,6 +224,14 @@ impl<const N: usize> From<CappedString<N>> for String {
     #[inline]
     fn from(s: CappedString<N>) -> Self {
         s.into_string()
+    }
+}
+
+#[cfg(feature = "alloc")]
+impl<const N: usize> From<CappedString<N>> for Box<str> {
+    #[inline]
+    fn from(s: CappedString<N>) -> Self {
+        s.into_boxed_str()
     }
 }
 
