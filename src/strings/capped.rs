@@ -3,8 +3,8 @@ use core::{
     cmp::Ordering,
     fmt,
     hash::{Hash, Hasher},
-    ops,
-    str,
+    mem::MaybeUninit,
+    ops, ptr, str,
 };
 
 #[cfg(not(feature = "std"))]
@@ -22,7 +22,7 @@ use std::borrow::Cow;
 
 /// A string type which stores at most `N` bytes of string data. The string data is stored inline
 /// rather than using a heap allocation.
-/// 
+///
 /// ```
 /// # use libshire::strings::CappedString;
 /// # fn main() -> Result<(), libshire::strings::capped::Error> {
@@ -33,7 +33,7 @@ use std::borrow::Cow;
 /// ```
 #[derive(Clone)]
 pub struct CappedString<const N: usize> {
-    buf: [u8; N],
+    buf: [MaybeUninit<u8>; N],
     len: u8,
 }
 
@@ -51,15 +51,21 @@ impl<const N: usize> CappedString<N> {
     ///
     /// # Safety
     ///
-    /// The first `len` bytes of `buf` (i.e. `buf[..len]`) must be valid UTF-8.
+    /// The first `len` bytes of `buf` (i.e. `buf[..len]`) must be initialised and valid UTF-8.
     #[inline]
     #[must_use]
-    pub const unsafe fn from_raw_parts(buf: [u8; N], len: u8) -> Self {
+    pub const unsafe fn from_raw_parts(buf: [MaybeUninit<u8>; N], len: u8) -> Self {
         Self { buf, len }
     }
 
+    #[inline]
+    #[must_use]
+    pub fn into_raw_parts(self) -> ([MaybeUninit<u8>; N], u8) {
+        (self.buf, self.len)
+    }
+
     /// Returns a new empty `CappedString`.
-    /// 
+    ///
     /// ```
     /// # use libshire::strings::CappedString;
     /// let s = CappedString::<8>::empty();
@@ -71,15 +77,20 @@ impl<const N: usize> CappedString<N> {
     #[must_use]
     pub const fn empty() -> Self {
         // SAFETY:
-        // The first zero bytes of the buffer are valid UTF-8, because an empty byte slice is
-        // valid UTF-8.
-        unsafe { Self::from_raw_parts([0; N], 0) }
+        // `MaybeUninit::uninit()` is a valid value for `[MaybeUninit<u8>; N]`, since each element
+        // of the array is allowed to be uninitialised.
+        let buf = unsafe { MaybeUninit::<[MaybeUninit<u8>; N]>::uninit().assume_init() };
+
+        // SAFETY:
+        // It is vacuously true that the first 0 bytes of the buffer are initialised and valid
+        // UTF-8.
+        unsafe { Self::from_raw_parts(buf, 0) }
     }
 
     /// Returns a new `CappedString` containing the given string data. The string data will be
     /// stored inline; no heap allocation is used. An error will be returned if the length of the
     /// provided string exceeds the `CappedString`'s maximum length, `N`.
-    /// 
+    ///
     /// ```
     /// # use libshire::strings::CappedString;
     /// # fn main() -> Result<(), libshire::strings::capped::Error> {
@@ -95,20 +106,32 @@ impl<const N: usize> CappedString<N> {
     {
         // Convert the string to a byte slice, which is guaranteed to be valid UTF-8 since this is
         // an invariant of `str`.
-        let s = <S as AsRef<str>>::as_ref(s).as_bytes();
+        let src = <S as AsRef<str>>::as_ref(s).as_bytes();
 
         // If the length of the string is greater than `Self::MAX_LEN`, it will not fit in the
         // buffer so return `None`.
-        let len = u8::try_from(s.len())
+        let len = u8::try_from(src.len())
             .ok()
             .and_then(|len| (len <= Self::MAX_LEN).then_some(len))
             .ok_or(Error {
                 max_len: N,
-                actual_len: s.len(),
+                actual_len: src.len(),
             })?;
 
-        let mut buf = [0; N];
-        buf[..usize::from(len)].copy_from_slice(s);
+        // SAFETY:
+        // `MaybeUninit::uninit()` is a valid value for `[MaybeUninit<u8>; N]`, since each element
+        // of the array is allowed to be uninitialised.
+        let mut buf = unsafe { MaybeUninit::<[MaybeUninit<u8>; N]>::uninit().assume_init() };
+
+        let src_ptr = src.as_ptr() as *const MaybeUninit<u8>;
+
+        // SAFETY:
+        // The source and destination to not overlap, since `buf` is a new local variable which is
+        // completely separate from the provided source string `s`. The source is valid for reads of
+        // `len` bytes since `len == src.len()`, and the destination is valid for writes of `len`
+        // bytes since `len <= N`. The source and destination are both trivially properly aligned,
+        // since they both have an alignment of 1.
+        unsafe { ptr::copy_nonoverlapping(src_ptr, buf.as_mut_ptr(), usize::from(len)) }
 
         // SAFETY:
         // The first `len` bytes of the buffer are valid UTF-8 because the first `len` bytes of
@@ -117,27 +140,58 @@ impl<const N: usize> CappedString<N> {
     }
 
     /// Returns a string slice pointing to the underlying string data.
+    #[inline]
+    #[must_use]
     pub fn as_str(&self) -> &str {
         // SAFETY:
-        // `len` being less than or equal to `N` is an invariant of `CappedString`, so it is
-        // always within the bounds of `buf`.
-        let slice = unsafe { self.buf.get_unchecked(..usize::from(self.len)) };
-
-        // SAFETY:
-        // The first `len` bytes of `buf` being valid UTF-8 is an invariant of `CappedString`.
-        unsafe { str::from_utf8_unchecked(slice) }
+        // The first `self.len` bytes of `self.buf` (which is returned by `Self::as_bytes`) being
+        // valid UTF-8 is an invariant of `CappedString`.
+        unsafe { str::from_utf8_unchecked(self.as_bytes()) }
     }
 
     /// Returns a mutable string slice pointing to the underlying string data.
+    #[inline]
+    #[must_use]
     pub fn as_str_mut(&mut self) -> &mut str {
         // SAFETY:
-        // `len` being less than or equal to `N` is an invariant of `CappedString`, so it is
-        // always within the bounds of `buf`.
-        let slice = unsafe { self.buf.get_unchecked_mut(..usize::from(self.len)) };
+        // The first `self.len` bytes of `self.buf` (which is returned by `Self::as_bytes_mut`)
+        // being valid UTF-8 is an invariant of `CappedString`.
+        unsafe { str::from_utf8_unchecked_mut(self.as_bytes_mut()) }
+    }
 
+    #[inline]
+    #[must_use]
+    pub fn as_bytes(&self) -> &[u8] {
+        // Get the slice of the buffer containing initialised string data.
         // SAFETY:
-        // The first `len` bytes of `buf` being valid UTF-8 is an invariant of `CappedString`.
-        unsafe { str::from_utf8_unchecked_mut(slice) }
+        // It is an invariant of `CappedString` that `self.len <= N`, so `..self.len` is a valid
+        // range over `self.buf`.
+        let data_slice = unsafe { self.buf.get_unchecked(..usize::from(self.len)) };
+
+        // Convert the `&[MaybeUninit<u8>]` to a `&[u8]`.
+        // SAFETY:
+        // `MaybeUninit<u8>` has the same memory layout as `u8`, and the first `self.len` bytes of
+        // the buffer are initialised, so this conversion is valid.
+        unsafe { &*(data_slice as *const [MaybeUninit<u8>] as *const [u8]) }
+    }
+
+    /// # Safety
+    /// The caller is responsible for ensuring that the slice is valid UTF-8 when the mutable
+    /// borrow ends.
+    #[inline]
+    #[must_use]
+    pub unsafe fn as_bytes_mut(&mut self) -> &mut [u8] {
+        // Get the slice of the buffer containing initialised string data.
+        // SAFETY:
+        // It is an invariant of `CappedString` that `self.len <= N`, so `..self.len` is a valid
+        // range over `self.buf`.
+        let data_slice = unsafe { self.buf.get_unchecked_mut(..usize::from(self.len)) };
+
+        // Convert the `&[MaybeUninit<u8>]` to a `&[u8]`.
+        // SAFETY:
+        // `MaybeUninit<u8>` has the same memory layout as `u8`, and the first `self.len` bytes of
+        // the buffer are initialised, so this conversion is valid.
+        unsafe { &mut *(data_slice as *mut [MaybeUninit<u8>] as *mut [u8]) }
     }
 
     pub fn len(&self) -> usize {
