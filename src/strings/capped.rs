@@ -77,8 +77,8 @@ impl<const N: usize> CappedString<N> {
     }
 
     /// # Safety
-    /// `src` must point to `len` bytes of valid, initialised, UTF-8 string data. `len` must be less
-    /// than or equal to `N`.
+    /// `src` must point to `len` bytes of valid, UTF-8 string data. `len` must be less than or
+    /// equal to `N`.
     #[inline]
     unsafe fn from_raw_ptr(src: *const u8, len: u8) -> Self {
         // `u8` has the same memory layout as `MaybeUninit<u8>`, so this cast is valid.
@@ -102,6 +102,25 @@ impl<const N: usize> CappedString<N> {
         // data. `src` is copied into the start of `buf`, so the first `len` bytes of `buf` are
         // valid UTF-8. The caller is responsible for ensuring that `len <= N`.
         unsafe { Self::from_raw_parts(buf, len) }
+    }
+
+    /// # Safety
+    /// `src` must point to `len` bytes of valid UTF-8 string data. `len` must be less than or equal
+    /// to `N - self.len`.
+    unsafe fn append_to_buf(&mut self, src: *const u8, len: u8) {
+        // `u8` has the same memory layout as `MaybeUninit<u8>`, so this cast is valid.
+        let src = src as *const MaybeUninit<u8>;
+
+        // SAFETY:
+        // `self.len <= N` is an invariant of `CappedString`, so `self.len..` is a valid range over
+        // `self.buf`.
+        let dst = unsafe { self.buf.get_unchecked_mut(usize::from(self.len)..) };
+
+        // SAFETY:
+        // 
+        unsafe { ptr::copy_nonoverlapping(src, dst.as_mut_ptr(), usize::from(len)); }
+
+        self.len += len;
     }
 
     /// Returns a new empty `CappedString`.
@@ -179,26 +198,66 @@ impl<const N: usize> CappedString<N> {
         unsafe { Self::from_raw_ptr(src, len) }
     }
 
+    /// Appends the given character to the end of this `CappedString`, returning an error if there
+    /// is insufficient capacity remaining to do so.
+    /// 
+    /// If you do not care whether or not the append succeeds, see [`Self::push_truncating`].
     pub fn push(&mut self, c: char) -> Result<(), CapacityError> {
         todo!()
     }
 
+    /// Appends the given character to the end of this `CappedString`, failing silently if there is
+    /// insufficient capacity remaining to do so.
+    /// 
+    /// If you would like to know whether or not the append succeeds, see [`Self::push`].
     pub fn push_truncating(&mut self, c: char) {
         todo!()
     }
 
-    pub fn push_str<S>(&mut self, s: &S) -> Result<(), CapacityError>
+    /// Appends the given string slice to the end of this `CappedString`, returning an error if
+    /// there is insufficient capacity remaining to do so.
+    /// 
+    /// If you would like a version which cannot fail, see [`Self::push_str_truncating`].
+    pub fn push_str<S>(&mut self, src: &S) -> Result<(), CapacityError>
     where
         S: AsRef<str> + ?Sized,
     {
-        todo!()
+        let src = <S as AsRef<str>>::as_ref(src);
+
+        let len = match u8::try_from(src.len()) {
+            Ok(len) if len <= Self::MAX_LEN - self.len => len,
+            _ => return Err(CapacityError),
+        };
+
+        // SAFETY:
+        // 
+        unsafe { self.append_to_buf(src.as_ptr(), len); }
+
+        Ok(())
     }
 
-    pub fn push_str_truncating<S>(&mut self, s: &S)
+    /// Appends as many of the characters of the given string slice to the end of this 
+    /// `CappedString` as can fit. Any remaining characters will not be added.
+    /// 
+    /// If you would like a version which returns an error if there is not enough capacity remaining
+    /// to append the entire string slice, see [`Self::push_str`].
+    pub fn push_str_truncating<S>(&mut self, src: &S)
     where
         S: AsRef<str> + ?Sized,
     {
-        todo!()
+        let remaining_cap = Self::MAX_LEN - self.len;
+
+        if remaining_cap == 0 {
+            return;
+        }
+
+        let src = <S as AsRef<str>>::as_ref(src);
+
+        let (src, len) = truncate_str(src, remaining_cap);
+
+        // SAFETY:
+        // 
+        unsafe { self.append_to_buf(src, len); }
     }
 
     /// Returns a string slice pointing to the underlying string data.
