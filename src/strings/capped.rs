@@ -146,32 +146,20 @@ impl<const N: usize> CappedString<N> {
     {
         // Convert the string to a byte slice, which is guaranteed to be valid UTF-8 since this is
         // an invariant of `str`.
-        let src = <S as AsRef<str>>::as_ref(src).as_bytes();
+        let src = <S as AsRef<str>>::as_ref(src);
 
-        // If the length of the string is greater than `Self::MAX_LEN`, it will not fit in the
-        // buffer so return an error.
-        let len = Self::bound_to_max_len(src.len())
-            .ok_or(CapacityError)?;
-
-        // SAFETY:
-        // `MaybeUninit::uninit()` is a valid value for `[MaybeUninit<u8>; N]`, since each element
-        // of the array is allowed to be uninitialised.
-        let mut buf = unsafe { MaybeUninit::<[MaybeUninit<u8>; N]>::uninit().assume_init() };
-
-        let src_ptr = src.as_ptr() as *const MaybeUninit<u8>;
+        // If the length of the `src` string does not fit into a `u8` or is greater than 
+        // `Self::MAX_LEN`, we can't fit it into the new `CappedString` so return an error.
+        let len = match u8::try_from(src.len()) {
+            Ok(len) if len <= Self::MAX_LEN => len,
+            _ => return Err(CapacityError),
+        };
 
         // SAFETY:
-        // The source and destination to not overlap, since `buf` is a new local variable which is
-        // completely separate from the provided source string `s`. The source is valid for reads of
-        // `len` bytes since `len == src.len()`, and the destination is valid for writes of `len`
-        // bytes since `len <= N`. The source and destination are both trivially properly aligned,
-        // since they both have an alignment of 1.
-        unsafe { ptr::copy_nonoverlapping(src_ptr, buf.as_mut_ptr(), usize::from(len)) }
-
-        // SAFETY:
-        // The first `len` bytes of the buffer are valid UTF-8 because the first `len` bytes of
-        // the buffer contain data copied from a `&str`, and `&str` is always valid UTF-8.
-        unsafe { Ok(Self::from_raw_parts(buf, len)) }
+        // `src.as_ptr()` points to `len` bytes of valid UTF-8 string data since `src` is a `&str`
+        // and `len` is its length. `len` is less than or equal to `Self::MAX_LEN`, which is equal
+        // to `N`.
+        unsafe { Ok(Self::from_raw_ptr(src.as_ptr(), len)) }
     }
 
     #[inline]
@@ -180,22 +168,15 @@ impl<const N: usize> CappedString<N> {
     where
         S: AsRef<str> + ?Sized,
     {
-        let (src, len) = truncate_str(<S as AsRef<str>>::as_ref(src), Self::MAX_LEN);
+        let src = <S as AsRef<str>>::as_ref(src);
+
+        let (src, len) = truncate_str(src, Self::MAX_LEN);
 
         // SAFETY:
         // It is part of the contract of `truncate_str` that it returns a pointer to a valid UTF-8
         // string of length `len`, and that `len` is less than or equal to the provided maximum
         // length, which is `Self::MAX_LEN` (which is equal to `N`) in this case.
         unsafe { Self::from_raw_ptr(src, len) }
-    }
-
-    /// Returns the length as a `u8` if it is less than or equal to `Self::MAX_LEN` (which is the
-    /// `u8` representation of `N`). Otherwise, returns `None`.
-    #[inline]
-    fn bound_to_max_len(len: usize) -> Option<u8> {
-        u8::try_from(len)
-            .ok()
-            .and_then(|len| (len <= Self::MAX_LEN).then_some(len))
     }
 
     pub fn push(&mut self, c: char) -> Result<(), CapacityError> {
