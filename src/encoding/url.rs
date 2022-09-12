@@ -396,7 +396,7 @@ where
             Cow::Borrowed(decoded_str) => {
                 debug_assert_eq!(decoded_str.len(), decoded.len());
                 debug_assert_eq!(
-                    decoded_str.as_bytes().as_ptr() as *const u8,
+                    decoded_str.as_bytes().as_ptr(),
                     decoded.as_ptr()
                 );
 
