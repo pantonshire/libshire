@@ -271,7 +271,8 @@ impl<const N: usize> CappedString<N> {
         };
 
         // SAFETY:
-        // 
+        // `src` is a valid string slice with length `len`. We have checked that
+        // `len <= N - self.len` holds above (note that `Self::MAX_LEN == N`).
         unsafe { self.append_bytes(src.as_ptr(), len); }
 
         Ok(())
@@ -289,16 +290,20 @@ impl<const N: usize> CappedString<N> {
     {
         let remaining_cap = Self::MAX_LEN - self.len;
 
+        // Short-circuit if we have no space left to copy into.
         if remaining_cap == 0 {
             return;
         }
 
         let src = <S as AsRef<str>>::as_ref(src);
 
+        // Find the longest valid UTF-8 prefix which fits into the remaining space.
         let (src, len) = truncate_str(src, remaining_cap);
 
         // SAFETY:
-        // 
+        // `truncate_str` returns a pointer to `len` bytes of valid UTF-8 string data. The returned
+        // `len` will always be less than or equal to `remaining_cap`, which is equal to
+        // `N - self.len` (note that `Self::MAX_LEN == N`).
         unsafe { self.append_bytes(src, len); }
     }
 
@@ -545,7 +550,7 @@ impl<const N: usize> fmt::Display for CappedString<N> {
 }
 
 /// Returns a pointer to the longest prefix of `src` which is valid UTF-8 and whose length is
-/// shorter than `max_len`, and returns the length of this prefix.
+/// less than or equal to `max_len`, and returns the length of this prefix.
 #[inline]
 fn truncate_str(src: &str, max_len: u8) -> (*const u8, u8) {
     match u8::try_from(src.len()) {
@@ -586,18 +591,6 @@ fn truncate_str(src: &str, max_len: u8) -> (*const u8, u8) {
 
                 i -= 1;
             }
-
-            // // SAFETY:
-            // // As discussed above, `i < src.len()` always holds, so `..i` is a valid range over
-            // // `src`.
-            // let src_truncated = unsafe { src.get_unchecked(..usize::from(i)) };
-
-            // // SAFETY:
-            // // `i` is the index of a start of a codepoint, and codepoints are contiguous, so the
-            // // substring `src[..i]` must be valid UTF-8.
-            // let src_truncated = unsafe { str::from_utf8_unchecked(src_truncated) };
-
-            // (src_truncated, i)
 
             // `i < src.len()` always holds as discussed above, so the pointer `src.as_ptr()` is
             // valid for reads of `i` bytes. `i` is the index of the start of a codepoint, and
