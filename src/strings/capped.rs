@@ -105,9 +105,22 @@ impl<const N: usize> CappedString<N> {
     }
 
     /// # Safety
+    /// `self.len` must be less than `N`, so that there is space in the buffer to append the byte.
+    #[inline]
+    unsafe fn append_byte(&mut self, byte: u8) {
+        // SAFETY:
+        // The caller is responsible for ensuring that `self.len < N`.
+        let dst = unsafe { self.buf.get_unchecked_mut(usize::from(self.len)) };
+        
+        *dst = MaybeUninit::new(byte);
+        self.len += 1;
+    }
+
+    /// # Safety
     /// `src` must point to `len` bytes of valid UTF-8 string data. `len` must be less than or equal
     /// to `N - self.len`.
-    unsafe fn append_to_buf(&mut self, src: *const u8, len: u8) {
+    #[inline]
+    unsafe fn append_bytes(&mut self, src: *const u8, len: u8) {
         // `u8` has the same memory layout as `MaybeUninit<u8>`, so this cast is valid.
         let src = src as *const MaybeUninit<u8>;
 
@@ -117,7 +130,12 @@ impl<const N: usize> CappedString<N> {
         let dst = unsafe { self.buf.get_unchecked_mut(usize::from(self.len)..) };
 
         // SAFETY:
-        // 
+        // The caller is responsible for ensuring that `src` points to a valid string, which means
+        // that it cannot overlap with the new local variable `buf`. The caller is responsible for
+        // ensuring that `src` is valid for reads of `len` bytes. The caller is responsible for
+        // ensuring that `len <= N - self.len`, so the destination `dst = self.buf[self.len..]` is
+        // valid for writes of `len` bytes. `src` and `dst` are both trivially properly aligned,
+        // since they both have an alignment of 1.
         unsafe { ptr::copy_nonoverlapping(src, dst.as_mut_ptr(), usize::from(len)); }
 
         self.len += len;
@@ -202,22 +220,45 @@ impl<const N: usize> CappedString<N> {
     /// is insufficient capacity remaining to do so.
     /// 
     /// If you do not care whether or not the append succeeds, see [`Self::push_truncating`].
+    #[inline]
     pub fn push(&mut self, c: char) -> Result<(), CapacityError> {
-        todo!()
+        let mut char_buf = [0u8; 4];
+        let encoded = c.encode_utf8(&mut char_buf);
+
+        match encoded.len() {
+            1 => {
+                if self.len == Self::MAX_LEN {
+                    return Err(CapacityError);
+                }
+
+                // SAFETY:
+                // 
+                unsafe { self.append_byte(encoded.as_bytes()[0]) }
+
+                Ok(())
+            },
+
+            _ => self.push_str(encoded),
+        }
     }
 
     /// Appends the given character to the end of this `CappedString`, failing silently if there is
     /// insufficient capacity remaining to do so.
     /// 
     /// If you would like to know whether or not the append succeeds, see [`Self::push`].
+    #[inline]
     pub fn push_truncating(&mut self, c: char) {
-        todo!()
+        // Unlike `Self::push_str_truncating`, we can just use `Self::push` and swallow the error
+        // because a single character will never be partially pushed; it is either pushed or it
+        // isn't.
+        self.push(c).ok();
     }
 
     /// Appends the given string slice to the end of this `CappedString`, returning an error if
     /// there is insufficient capacity remaining to do so.
     /// 
     /// If you would like a version which cannot fail, see [`Self::push_str_truncating`].
+    #[inline]
     pub fn push_str<S>(&mut self, src: &S) -> Result<(), CapacityError>
     where
         S: AsRef<str> + ?Sized,
@@ -231,7 +272,7 @@ impl<const N: usize> CappedString<N> {
 
         // SAFETY:
         // 
-        unsafe { self.append_to_buf(src.as_ptr(), len); }
+        unsafe { self.append_bytes(src.as_ptr(), len); }
 
         Ok(())
     }
@@ -241,6 +282,7 @@ impl<const N: usize> CappedString<N> {
     /// 
     /// If you would like a version which returns an error if there is not enough capacity remaining
     /// to append the entire string slice, see [`Self::push_str`].
+    #[inline]
     pub fn push_str_truncating<S>(&mut self, src: &S)
     where
         S: AsRef<str> + ?Sized,
@@ -257,7 +299,7 @@ impl<const N: usize> CappedString<N> {
 
         // SAFETY:
         // 
-        unsafe { self.append_to_buf(src, len); }
+        unsafe { self.append_bytes(src, len); }
     }
 
     /// Returns a string slice pointing to the underlying string data.
