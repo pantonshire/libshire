@@ -37,7 +37,7 @@ impl std::error::Error for CapacityError {}
 ///
 /// ```
 /// # use libshire::strings::CappedString;
-/// # fn main() -> Result<(), libshire::strings::capped::Error> {
+/// # fn main() -> Result<(), libshire::strings::capped::CapacityError> {
 /// let s = CappedString::<16>::new("hello world")?;
 /// assert_eq!(&*s, "hello world");
 /// # Ok(())
@@ -106,6 +106,7 @@ impl<const N: usize> CappedString<N> {
 
     /// # Safety
     /// `self.len` must be less than `N`, so that there is space in the buffer to append the byte.
+    /// The byte must be a valid UTF-8 codepoint; it must be in the range `0..=127`.
     #[inline]
     unsafe fn append_byte(&mut self, byte: u8) {
         // SAFETY:
@@ -167,10 +168,12 @@ impl<const N: usize> CappedString<N> {
     /// Returns a new `CappedString` containing the given string data. The string data will be
     /// stored inline; no heap allocation is used. An error will be returned if the length of the
     /// provided string exceeds the `CappedString`'s maximum length, `N`.
+    /// 
+    /// If you would like a version which never returns an error, see [`Self::new_truncating`].
     ///
     /// ```
     /// # use libshire::strings::CappedString;
-    /// # fn main() -> Result<(), libshire::strings::capped::Error> {
+    /// # fn main() -> Result<(), libshire::strings::capped::CapacityError> {
     /// let s = CappedString::<16>::new("hello world")?;
     /// assert_eq!(&*s, "hello world");
     /// # Ok(())
@@ -199,6 +202,21 @@ impl<const N: usize> CappedString<N> {
         unsafe { Ok(Self::from_raw_ptr(src.as_ptr(), len)) }
     }
 
+    /// Returns a new `CappedString` containing the given string data. The string data will be
+    /// stored inline; no heap allocation is used. If the length of the provided string exceeds the
+    /// `CappedString`'s maximum length, `N`, it will be truncated to fit.
+    /// 
+    /// If you would like a version which returns an error rather than truncating the string, see
+    /// [`Self::new`].
+    /// 
+    /// ```
+    /// # use libshire::strings::CappedString;
+    /// let s1 = CappedString::<15>::new_truncating("こんにちは");
+    /// assert_eq!(&*s1, "こんにちは");
+    /// 
+    /// let s2 = CappedString::<10>::new_truncating("こんにちは");
+    /// assert_eq!(&*s2, "こんに");
+    /// ```
     #[inline]
     #[must_use]
     pub fn new_truncating<S>(src: &S) -> Self
@@ -232,7 +250,11 @@ impl<const N: usize> CappedString<N> {
                 }
 
                 // SAFETY:
-                // 
+                // We have checked that `self.len != N` (`Self::MAX_LEN == N`). Since it is an
+                // invariant of `CappedString` that `self.len <= N`, it must hold that 
+                // `self.len < N`. The first byte of a `str` of length 1 must be a valid UTF-8
+                // codepoint; it must be in the range `0..=127`, since anything outside this range
+                // implies the presence of further bytes.
                 unsafe { self.append_byte(encoded.as_bytes()[0]) }
 
                 Ok(())
@@ -258,6 +280,20 @@ impl<const N: usize> CappedString<N> {
     /// there is insufficient capacity remaining to do so.
     /// 
     /// If you would like a version which cannot fail, see [`Self::push_str_truncating`].
+    /// 
+    /// ```
+    /// # use libshire::strings::CappedString;
+    /// let mut s = CappedString::<8>::empty();
+    /// 
+    /// assert!(s.push_str("hello").is_ok());
+    /// assert_eq!(&*s, "hello");
+    /// 
+    /// assert!(s.push_str(" world").is_err());
+    /// assert_eq!(&*s, "hello");
+    /// 
+    /// assert!(s.push_str("!!!").is_ok());
+    /// assert_eq!(&*s, "hello!!!");
+    /// ```
     #[inline]
     pub fn push_str<S>(&mut self, src: &S) -> Result<(), CapacityError>
     where
@@ -283,6 +319,20 @@ impl<const N: usize> CappedString<N> {
     /// 
     /// If you would like a version which returns an error if there is not enough capacity remaining
     /// to append the entire string slice, see [`Self::push_str`].
+    /// 
+    /// ```
+    /// # use libshire::strings::CappedString;
+    /// let mut s = CappedString::<10>::empty();
+    /// 
+    /// s.push_str_truncating("hello");
+    /// assert_eq!(&*s, "hello");
+    /// 
+    /// s.push_str_truncating(" 世界");
+    /// assert_eq!(&*s, "hello 世");
+    /// 
+    /// s.push_str_truncating("!!!");
+    /// assert_eq!(&*s, "hello 世!");
+    /// ```
     #[inline]
     pub fn push_str_truncating<S>(&mut self, src: &S)
     where
@@ -326,6 +376,15 @@ impl<const N: usize> CappedString<N> {
     /// ```
     #[inline]
     pub fn clear(&mut self) {
+        // Setting the length to 0 is enough to clear the `CappedString`; we don't need to replace
+        // any of the old bytes in the buffer, as setting the length to 0 makes all of the old bytes
+        // inaccessible via safe methods, and means that any future calls to `Self::push` and
+        // friends will write over the old bytes.
+        // 
+        // It may be desirable for security-critical code to zero the old buffer to prevent cleared
+        // data from being exposed via buffer-overflow exploits or similar. However, this should be
+        // implemented in a separate function so that regular users don't have to pay the cost of
+        // zeroing the buffer.
         self.len = 0;
     }
 
@@ -340,15 +399,37 @@ impl<const N: usize> CappedString<N> {
     }
 
     /// Returns a mutable string slice pointing to the underlying string data.
+    /// 
+    /// ```
+    /// # use libshire::strings::CappedString;
+    /// # fn main() -> Result<(), libshire::strings::capped::CapacityError> {
+    /// let mut s = CappedString::<16>::new("hello!")?;
+    /// s.as_str_mut().make_ascii_uppercase();
+    /// assert_eq!(&*s, "HELLO!");
+    /// # Ok(())
+    /// # }
+    /// ```
     #[inline]
     #[must_use]
     pub fn as_str_mut(&mut self) -> &mut str {
         // SAFETY:
         // The first `self.len` bytes of `self.buf` (which is returned by `Self::as_bytes_mut`)
-        // being valid UTF-8 is an invariant of `CappedString`.
+        // being valid UTF-8 is an invariant of `CappedString`. Since we are returning a `&mut str`
+        // to the caller, the caller cannot safely use it to mutate this `CappedString`'s buffer in
+        // a way that violates the UTF-8 property.
         unsafe { str::from_utf8_unchecked_mut(self.as_bytes_mut()) }
     }
 
+    /// Returns a byte slice containing the UTF-8 bytes representing the string.
+    /// 
+    /// ```
+    /// # use libshire::strings::CappedString;
+    /// # fn main() -> Result<(), libshire::strings::capped::CapacityError> {
+    /// let s = CappedString::<16>::new("hello!")?;
+    /// assert_eq!(s.as_bytes(), &[0x68, 0x65, 0x6c, 0x6c, 0x6f, 0x21]);
+    /// # Ok(())
+    /// # }
+    /// ```
     #[inline]
     #[must_use]
     pub fn as_bytes(&self) -> &[u8] {
@@ -366,8 +447,8 @@ impl<const N: usize> CappedString<N> {
     }
 
     /// # Safety
-    /// The caller is responsible for ensuring that the slice is valid UTF-8 when the mutable
-    /// borrow ends.
+    /// The slice must be valid UTF-8 when the mutable borrow ends and this `CappedString` is used
+    /// again.
     #[inline]
     #[must_use]
     pub unsafe fn as_bytes_mut(&mut self) -> &mut [u8] {
@@ -623,4 +704,191 @@ fn truncate_str(src: &str, max_len: u8) -> (*const u8, u8) {
 }
 
 #[cfg(test)]
-mod tests {}
+mod tests {
+    use super::CappedString;
+
+    #[test]
+    fn test_truncate_str() {
+        use super::truncate_str;
+
+        let s1 = "hello";
+        assert_eq!(truncate_str(s1, 0), (s1.as_ptr(), 0));
+        assert_eq!(truncate_str(s1, 1), (s1.as_ptr(), 1));
+        assert_eq!(truncate_str(s1, 5), (s1.as_ptr(), 5));
+        assert_eq!(truncate_str(s1, 6), (s1.as_ptr(), 5));
+
+        let s2 = "こんにちは";
+        assert_eq!(truncate_str(s2, 0), (s2.as_ptr(), 0));
+        assert_eq!(truncate_str(s2, 1), (s2.as_ptr(), 0));
+        assert_eq!(truncate_str(s2, 2), (s2.as_ptr(), 0));
+        assert_eq!(truncate_str(s2, 3), (s2.as_ptr(), 3));
+        assert_eq!(truncate_str(s2, 4), (s2.as_ptr(), 3));
+        assert_eq!(truncate_str(s2, 5), (s2.as_ptr(), 3));
+        assert_eq!(truncate_str(s2, 6), (s2.as_ptr(), 6));
+        assert_eq!(truncate_str(s2, 14), (s2.as_ptr(), 12));
+        assert_eq!(truncate_str(s2, 15), (s2.as_ptr(), 15));
+        assert_eq!(truncate_str(s2, 16), (s2.as_ptr(), 15));
+        assert_eq!(truncate_str(s2, 18), (s2.as_ptr(), 15));
+
+        let s3 = "🤖 こんにちは, world 🤖";
+        assert_eq!(truncate_str(s3, 0), (s3.as_ptr(), 0));
+        assert_eq!(truncate_str(s3, 1), (s3.as_ptr(), 0));
+        assert_eq!(truncate_str(s3, 2), (s3.as_ptr(), 0));
+        assert_eq!(truncate_str(s3, 3), (s3.as_ptr(), 0));
+        assert_eq!(truncate_str(s3, 4), (s3.as_ptr(), 4));
+        assert_eq!(truncate_str(s3, 5), (s3.as_ptr(), 5));
+        assert_eq!(truncate_str(s3, 6), (s3.as_ptr(), 5));
+        assert_eq!(truncate_str(s3, 7), (s3.as_ptr(), 5));
+        assert_eq!(truncate_str(s3, 8), (s3.as_ptr(), 8));
+        assert_eq!(truncate_str(s3, 28), (s3.as_ptr(), 28));
+        assert_eq!(truncate_str(s3, 29), (s3.as_ptr(), 28));
+        assert_eq!(truncate_str(s3, 30), (s3.as_ptr(), 28));
+        assert_eq!(truncate_str(s3, 31), (s3.as_ptr(), 28));
+        assert_eq!(truncate_str(s3, 32), (s3.as_ptr(), 32));
+        assert_eq!(truncate_str(s3, 33), (s3.as_ptr(), 32));
+        assert_eq!(truncate_str(s3, 36), (s3.as_ptr(), 32));
+
+        let s4 = "a";
+        assert_eq!(truncate_str(s4, 0), (s4.as_ptr(), 0));
+        assert_eq!(truncate_str(s4, 1), (s4.as_ptr(), 1));
+        assert_eq!(truncate_str(s4, 2), (s4.as_ptr(), 1));
+        assert_eq!(truncate_str(s4, 3), (s4.as_ptr(), 1));
+        assert_eq!(truncate_str(s4, 4), (s4.as_ptr(), 1));
+
+        let s5 = "";
+        assert_eq!(truncate_str(s5, 0), (s5.as_ptr(), 0));
+        assert_eq!(truncate_str(s5, 1), (s5.as_ptr(), 0));
+        assert_eq!(truncate_str(s5, 2), (s5.as_ptr(), 0));
+        assert_eq!(truncate_str(s5, 3), (s5.as_ptr(), 0));
+        assert_eq!(truncate_str(s5, 4), (s5.as_ptr(), 0));
+
+        let s6 = "На берегу пустынных волн\n\
+                  Стоял он, дум великих полн,\n\
+                  И вдаль глядел. Пред ним широко\n\
+                  Река неслася; бедный чёлн\n\
+                  По ней стремился одиноко.\n\
+                  По мшистым, топким берегам\n\
+                  Чернели избы здесь и там,\n\
+                  Приют убогого чухонца;\n\
+                  И лес, неведомый лучам\n\
+                  В тумане спрятанного солнца,\n\
+                  Кругом шумел.";
+        assert_eq!(truncate_str(s6, 0), (s6.as_ptr(), 0));
+        assert_eq!(truncate_str(s6, 1), (s6.as_ptr(), 0));
+        assert_eq!(truncate_str(s6, 2), (s6.as_ptr(), 2));
+        assert_eq!(truncate_str(s6, 3), (s6.as_ptr(), 2));
+        assert_eq!(truncate_str(s6, 4), (s6.as_ptr(), 4));
+        assert_eq!(truncate_str(s6, 254), (s6.as_ptr(), 253));
+        assert_eq!(truncate_str(s6, 255), (s6.as_ptr(), 255));
+    }
+
+    #[test]
+    fn test_new() {
+        assert_eq!(&*CappedString::<5>::new("").unwrap(), "");
+        assert_eq!(&*CappedString::<5>::new("a").unwrap(), "a");
+        assert_eq!(&*CappedString::<5>::new("hello").unwrap(), "hello");
+        assert_eq!(&*CappedString::<6>::new("hello").unwrap(), "hello");
+        assert!(CappedString::<5>::new("hello!").is_err());
+        assert_eq!(&*CappedString::<6>::new("hello!").unwrap(), "hello!");
+        assert_eq!(&*CappedString::<5>::new("こ").unwrap(), "こ");
+        assert!(CappedString::<5>::new("こん").is_err());
+        assert_eq!(&*CappedString::<6>::new("こん").unwrap(), "こん");
+        assert!(CappedString::<6>::new("こんにちは").is_err());
+        assert_eq!(&*CappedString::<0>::new("").unwrap(), "");
+        assert!(CappedString::<0>::new("a").is_err());
+    }
+
+    #[test]
+    fn test_new_truncating() {
+        assert_eq!(&*CappedString::<5>::new_truncating(""), "");
+        assert_eq!(&*CappedString::<5>::new_truncating("a"), "a");
+        assert_eq!(&*CappedString::<5>::new_truncating("hello"), "hello");
+        assert_eq!(&*CappedString::<6>::new_truncating("hello"), "hello");
+        assert_eq!(&*CappedString::<5>::new_truncating("hello!"), "hello");
+        assert_eq!(&*CappedString::<6>::new_truncating("hello!"), "hello!");
+        assert_eq!(&*CappedString::<5>::new_truncating("こ"), "こ");
+        assert_eq!(&*CappedString::<5>::new_truncating("こん"), "こ");
+        assert_eq!(&*CappedString::<6>::new_truncating("こん"), "こん");
+        assert_eq!(&*CappedString::<6>::new_truncating("こんにちは"), "こん");
+        assert_eq!(&*CappedString::<7>::new_truncating("こんにちは"), "こん");
+        assert_eq!(&*CappedString::<8>::new_truncating("こんにちは"), "こん");
+        assert_eq!(&*CappedString::<9>::new_truncating("こんにちは"), "こんに");
+        assert_eq!(&*CappedString::<3>::new_truncating("🤖 hello 🤖"), "");
+        assert_eq!(&*CappedString::<4>::new_truncating("🤖 hello 🤖"), "🤖");
+        assert_eq!(&*CappedString::<14>::new_truncating("🤖 hello 🤖"), "🤖 hello ");
+        assert_eq!(&*CappedString::<15>::new_truncating("🤖 hello 🤖"), "🤖 hello 🤖");
+        assert_eq!(&*CappedString::<20>::new_truncating("🤖 hello 🤖"), "🤖 hello 🤖");
+        assert_eq!(&*CappedString::<0>::new_truncating(""), "");
+        assert_eq!(&*CappedString::<0>::new_truncating("a"), "");
+    }
+
+    #[test]
+    fn test_push() {
+        let mut s = CappedString::<6>::empty();
+        s.push_str("").unwrap();
+        assert_eq!(&*s, "");
+        s.push('h').unwrap();
+        assert_eq!(&*s, "h");
+        s.push_str("ello").unwrap();
+        assert_eq!(&*s, "hello");
+        assert!(s.push_str(", world").is_err());
+        assert_eq!(&*s, "hello");
+    }
+
+    #[test]
+    fn test_push_truncating() {
+        let mut s = CappedString::<6>::empty();
+
+        s.push_str_truncating("");
+        assert_eq!(&*s, "");
+        s.push_truncating('h');
+        assert_eq!(&*s, "h");
+        s.push_str_truncating("ello");
+        assert_eq!(&*s, "hello");
+        s.push_str_truncating(", world");
+        assert_eq!(&*s, "hello,");
+        
+        s.clear();
+        
+        s.push_truncating('こ');
+        assert_eq!(&*s, "こ");
+        s.push_truncating('ん');
+        assert_eq!(&*s, "こん");
+        s.push_truncating('に');
+        assert_eq!(&*s, "こん");
+
+        s.clear();
+
+        s.push_truncating('🤖');
+        assert_eq!(&*s, "🤖");
+        s.push_truncating('🤖');
+        assert_eq!(&*s, "🤖");
+        s.push_str_truncating("!!!");
+        assert_eq!(&*s, "🤖!!");
+
+        s.clear();
+
+        s.push_str_truncating("🤖 ");
+        assert_eq!(&*s, "🤖 ");
+        s.push_truncating('🤖');
+        assert_eq!(&*s, "🤖 ");
+
+        s.clear();
+
+        s.push_str_truncating("  ");
+        assert_eq!(&*s, "  ");
+        s.push_str_truncating("🤖🤖🤖");
+        assert_eq!(&*s, "  🤖");
+        s.push_truncating('!');
+        assert_eq!(&*s, "  🤖");
+
+        s.clear();
+
+        s.push_str_truncating("   ");
+        assert_eq!(&*s, "   ");
+        s.push_truncating('🤖');
+        assert_eq!(&*s, "   ");
+        s.push_str_truncating("こんにちは");
+        assert_eq!(&*s, "   こ");
+    }
+}
