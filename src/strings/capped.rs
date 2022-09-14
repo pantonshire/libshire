@@ -307,6 +307,28 @@ impl<const N: usize> CappedString<N> {
         unsafe { self.append_bytes(src, len); }
     }
 
+    /// Empties the contents of this `CappedString`.
+    /// 
+    /// ```
+    /// # use libshire::strings::CappedString;
+    /// # fn main() -> Result<(), libshire::strings::capped::CapacityError> {
+    /// let mut s = CappedString::<16>::new("hello")?;
+    /// 
+    /// assert!(!s.is_empty());
+    /// assert_eq!(&*s, "hello");
+    /// 
+    /// s.clear();
+    /// 
+    /// assert!(s.is_empty());
+    /// assert_eq!(&*s, "");
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[inline]
+    pub fn clear(&mut self) {
+        self.len = 0;
+    }
+
     /// Returns a string slice pointing to the underlying string data.
     #[inline]
     #[must_use]
