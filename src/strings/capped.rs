@@ -20,6 +20,8 @@ use alloc::{
 #[cfg(feature = "std")]
 use std::borrow::Cow;
 
+use super::fixed::{FixedString, LengthError};
+
 #[derive(Debug)]
 pub struct CapacityError;
 
@@ -45,7 +47,11 @@ impl std::error::Error for CapacityError {}
 /// ```
 #[derive(Clone)]
 pub struct CappedString<const N: usize> {
+    /// The buffer storing the string data. It is an invariant of this type that the first `len`
+    /// elements of this buffer is initialised, valid UTF-8 string data.
     buf: [MaybeUninit<u8>; N],
+
+    /// The length of the string stored in `buf`.
     len: u8,
 }
 
@@ -70,6 +76,10 @@ impl<const N: usize> CappedString<N> {
         Self { buf, len }
     }
 
+    /// Returns the raw buffer and length backing this `CappedString`; the first element of the
+    /// tuple is the buffer `buf` and the second is the length `len`. The first `len` elements of
+    /// `buf` (i.e. `&buf[..usize::from(len)]`) is guaranteed to be initialised, valid UTF-8 string
+    /// data.
     #[inline]
     #[must_use]
     pub const fn into_raw_parts(self) -> ([MaybeUninit<u8>; N], u8) {
@@ -475,6 +485,24 @@ impl<const N: usize> CappedString<N> {
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.len == 0
+    }
+
+    #[inline]
+    pub fn into_fixed<const M: usize>(self) -> Result<FixedString<M>, LengthError> {
+        let buf: [u8; M] = self
+            .as_bytes()
+            .try_into()
+            .map_err(|_| LengthError)?;
+        
+        // SAFETY:
+        // It is an invariant of `CappedString` that the first `self.len` bytes of `self.buf` is
+        // valid UTF-8, so the bytes returned by `Self::as_bytes` are valid UTF-8.
+        unsafe { Ok(FixedString::from_raw_array(buf)) }
+    }
+
+    #[inline]
+    pub fn into_fixed_max_capacity(self) -> Result<FixedString<N>, LengthError> {
+        self.into_fixed()
     }
 }
 
