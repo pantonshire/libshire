@@ -7,13 +7,25 @@ use core::{
     str,
 };
 
+#[derive(Debug)]
+pub struct LengthError;
+
+impl fmt::Display for LengthError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "invalid string length for `FixedString`")
+    }
+}
+
+#[cfg(feature = "std")]
+impl std::error::Error for LengthError {}
+
 pub struct FixedString<const N: usize> {
     buf: [u8; N],
 }
 
 impl<const N: usize> FixedString<N> {
     #[inline]
-    pub fn new(s: &str) -> Result<Self, Error> {
+    pub fn new(s: &str) -> Result<Self, LengthError> {
         // SAFETY:
         // A `&str` is always valid UTF-8.
         unsafe { Self::from_raw_slice(s.as_bytes()) }
@@ -22,15 +34,12 @@ impl<const N: usize> FixedString<N> {
     /// # Safety
     /// The provided byte slice must be valid UTF-8.
     #[inline]
-    pub unsafe fn from_raw_slice(bytes: &[u8]) -> Result<Self, Error> {
+    pub unsafe fn from_raw_slice(bytes: &[u8]) -> Result<Self, LengthError> {
         match bytes.try_into() {
             // SAFETY:
             // The caller is reponsible for ensuring that the provided bytes are valid UTF-8.
             Ok(bytes) => unsafe { Ok(Self::from_raw_array(bytes)) },
-            Err(_) => Err(Error {
-                expected_len: N,
-                actual_len: bytes.len(),
-            }),
+            Err(_) => Err(LengthError),
         }
     }
 
@@ -116,7 +125,7 @@ impl<const N: usize> borrow::BorrowMut<str> for FixedString<N> {
 }
 
 impl<const N: usize> str::FromStr for FixedString<N> {
-    type Err = Error;
+    type Err = LengthError;
 
     #[inline]
     fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -125,7 +134,7 @@ impl<const N: usize> str::FromStr for FixedString<N> {
 }
 
 impl<'a, const N: usize> TryFrom<&'a str> for FixedString<N> {
-    type Error = Error;
+    type Error = LengthError;
 
     #[inline]
     fn try_from(value: &'a str) -> Result<Self, Self::Error> {
@@ -174,26 +183,6 @@ impl<const N: usize> fmt::Display for FixedString<N> {
         fmt::Display::fmt(&**self, f)
     }
 }
-
-#[derive(Debug)]
-pub struct Error {
-    expected_len: usize,
-    actual_len: usize,
-}
-
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "expected {} bytes of string data, found {} bytes",
-            self.expected_len,
-            self.actual_len
-        )
-    }
-}
-
-#[cfg(feature = "std")]
-impl std::error::Error for Error {}
 
 #[cfg(test)]
 mod tests {
