@@ -4,7 +4,7 @@ use core::{
     fmt,
     hash::{Hash, Hasher},
     mem::MaybeUninit,
-    ops, ptr, str,
+    ops, ptr, slice, str,
 };
 
 #[cfg(not(feature = "std"))]
@@ -443,17 +443,16 @@ impl<const N: usize> CappedString<N> {
     #[inline]
     #[must_use]
     pub fn as_bytes(&self) -> &[u8] {
-        // Get the slice of the buffer containing initialised string data.
-        // SAFETY:
-        // It is an invariant of `CappedString` that `self.len <= N`, so `..self.len` is a valid
-        // range over `self.buf`.
-        let data_slice = unsafe { self.buf.get_unchecked(..usize::from(self.len)) };
+        // Get a pointer to the start of the buffer and convert it from a `*const MaybeUninit<u8>`
+        // to a `*const u8`. This conversion is valid because `MaybeUninit<u8>` has the same memory
+        // layout as `u8`.
+        let data_ptr = self.buf.as_ptr() as *const u8;
 
-        // Convert the `&[MaybeUninit<u8>]` to a `&[u8]`.
         // SAFETY:
-        // `MaybeUninit<u8>` has the same memory layout as `u8`, and the first `self.len` bytes of
-        // the buffer are initialised, so this conversion is valid.
-        unsafe { &*(data_slice as *const [MaybeUninit<u8>] as *const [u8]) }
+        // It is an invariant of `CappedString` that the first `self.len` bytes of the buffer are
+        // initialised, so `data_ptr` is valid for reads of `self.len` bytes. `data_ptr` is
+        // trivially properly aligned, since `u8` has an alignment of 1.
+        unsafe { slice::from_raw_parts(data_ptr, usize::from(self.len)) }
     }
 
     /// # Safety
