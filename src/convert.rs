@@ -43,7 +43,6 @@ impl Empty for Infallible {
 }
 
 #[inline]
-#[must_use]
 pub fn result_elim<T, E>(res: Result<T, E>) -> T
 where
     E: Empty,
