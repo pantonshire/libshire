@@ -1,4 +1,4 @@
-use core::fmt;
+use core::fmt::{self, Arguments};
 
 pub trait StrSink {
     type Error;
@@ -29,17 +29,37 @@ where
     }
 }
 
+pub trait FmtSink: StrSink {
+    fn sink_fmt<'a>(&mut self, args: Arguments<'a>) -> Result<(), <Self as StrSink>::Error>;
+}
+
+impl<W> FmtSink for W
+where
+    W: fmt::Write,
+{
+    fn sink_fmt<'a>(&mut self, args: Arguments<'a>) -> Result<(), <Self as StrSink>::Error> {
+        self.write_fmt(args)
+    }
+}
+
+#[macro_export]
+macro_rules! sink_fmt {
+    ($dst:expr, $($arg:tt)*) => {
+        FmtSink::sink_fmt($dst, core::format_args!($($arg)*))
+    };
+}
+
 #[cfg(feature = "alloc")]
 pub use string_sink::SinkString;
 
 #[cfg(feature = "alloc")]
 mod string_sink {
-    use core::convert::Infallible;
+    use core::{convert::Infallible, fmt::{self, Arguments}};
 
     #[cfg(not(feature = "std"))]
     use alloc::string::String;
 
-    use super::StrSink;
+    use super::{StrSink, FmtSink};
 
     #[repr(transparent)]
     #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
@@ -91,6 +111,15 @@ mod string_sink {
         #[inline]
         fn sink_char(&mut self, c: char) -> Result<(), Self::Error> {
             self.0.push(c);
+            Ok(())
+        }
+    }
+
+    impl FmtSink for SinkString {
+        fn sink_fmt<'a>(&mut self, args: Arguments<'a>) -> Result<(), <Self as StrSink>::Error> {
+            // We discard any error, since writing to a `String` should be infallible for correct
+            // implementations of `Display` etc.
+            let _ = <String as fmt::Write>::write_fmt(&mut self.0, args);
             Ok(())
         }
     }
