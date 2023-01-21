@@ -30,7 +30,7 @@ where
 }
 
 #[cfg(feature = "alloc")]
-pub use string_sink::StringSink;
+pub use string_sink::SinkString;
 
 #[cfg(feature = "alloc")]
 mod string_sink {
@@ -43,9 +43,9 @@ mod string_sink {
 
     #[repr(transparent)]
     #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
-    pub struct StringSink(pub String);
+    pub struct SinkString(pub String);
 
-    impl StringSink {
+    impl SinkString {
         #[inline]
         #[must_use]
         pub fn from_string_ref(s: &String) -> &Self {
@@ -65,21 +65,21 @@ mod string_sink {
         }
     }
 
-    impl AsRef<StringSink> for String {
+    impl AsRef<SinkString> for String {
         #[inline]
-        fn as_ref(&self) -> &StringSink {
-            StringSink::from_string_ref(self)
+        fn as_ref(&self) -> &SinkString {
+            SinkString::from_string_ref(self)
         }
     }
 
-    impl AsMut<StringSink> for String {
+    impl AsMut<SinkString> for String {
         #[inline]
-        fn as_mut(&mut self) -> &mut StringSink {
-            StringSink::from_string_mut(self)
+        fn as_mut(&mut self) -> &mut SinkString {
+            SinkString::from_string_mut(self)
         }
     }
 
-    impl StrSink for StringSink {
+    impl StrSink for SinkString {
         type Error = Infallible;
 
         #[inline]

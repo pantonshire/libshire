@@ -175,9 +175,9 @@ pub fn percent_encode_to_buf<B>(buf: &mut String, bytes: &B)
 where
     B: AsRef<[u8]> + ?Sized,
 {
-    use crate::{convert::result_elim, sink::StringSink};
+    use crate::{convert::result_elim, sink::SinkString};
 
-    let sink = StringSink::from_string_mut(buf);
+    let sink = SinkString::from_string_mut(buf);
     result_elim(percent_encode_to(sink, bytes))
 }
 
