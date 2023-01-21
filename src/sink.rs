@@ -70,6 +70,18 @@ mod string_sink {
     impl SinkString {
         #[inline]
         #[must_use]
+        pub fn empty() -> Self {
+            Self(String::new())
+        }
+
+        #[inline]
+        #[must_use]
+        pub fn with_capacity(capacity: usize) -> Self {
+            Self(String::with_capacity(capacity))
+        }
+
+        #[inline]
+        #[must_use]
         pub fn from_string_ref(s: &String) -> &Self {
             // SAFETY:
             // Since `StringSink` uses `repr(transparent)`, it has the same memory layout as
