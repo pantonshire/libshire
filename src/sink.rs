@@ -49,6 +49,8 @@ macro_rules! sink_fmt {
     };
 }
 
+pub use sink_fmt;
+
 #[cfg(feature = "alloc")]
 pub use string_sink::SinkString;
 
