@@ -2,7 +2,7 @@ use core::{
     convert::identity,
     fmt,
     hint,
-    ops::{Deref, DerefMut},
+    ops::{Deref, DerefMut}, iter::FusedIterator,
 };
 
 use crate::convert::{clone, clone_mut, copy, copy_mut, Empty};
@@ -398,6 +398,16 @@ impl<L, R> Either<L, R> {
         }
         self
     }
+
+    pub fn iter<'a>(&'a self)
+        -> Iter<<&'a L as IntoIterator>::IntoIter, <&'a R as IntoIterator>::IntoIter>
+    where
+        &'a L: IntoIterator,
+        &'a R: IntoIterator,
+    {
+        self.as_ref().into_iter()
+    }
+        
 }
 
 impl<L, R> Either<&L, &R> {
@@ -610,3 +620,71 @@ where
         }
     }
 }
+
+impl<L, R> IntoIterator for Either<L, R>
+where
+    L: IntoIterator,
+    R: IntoIterator,
+{
+    type Item = Either<<L as IntoIterator>::Item, <R as IntoIterator>::Item>;
+
+    type IntoIter = Iter<<L as IntoIterator>::IntoIter, <R as IntoIterator>::IntoIter>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        Iter {
+            inner: self.map(<L as IntoIterator>::into_iter, <R as IntoIterator>::into_iter),
+        }
+    }
+}
+
+pub struct Iter<L, R> {
+    inner: Either<L, R>,
+}
+
+impl<L, R> Iterator for Iter<L, R>
+where
+    L: Iterator,
+    R: Iterator,
+{
+    type Item = Either<<L as IntoIterator>::Item, <R as IntoIterator>::Item>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match &mut self.inner {
+            Inl(l) => l.next().map(Inl),
+            Inr(r) => r.next().map(Inr),
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.inner.as_ref().fold(L::size_hint, R::size_hint)
+    }
+
+    fn count(self) -> usize {
+        self.inner.fold(L::count, R::count)
+    }
+}
+
+impl<L, R> DoubleEndedIterator for Iter<L, R>
+where
+    L: DoubleEndedIterator,
+    R: DoubleEndedIterator,
+{
+    fn next_back(&mut self) -> Option<Self::Item> {
+        match &mut self.inner {
+            Inl(l) => l.next_back().map(Inl),
+            Inr(r) => r.next_back().map(Inr),
+        }
+    }
+}
+
+impl<L, R> ExactSizeIterator for Iter<L, R>
+where
+    L: ExactSizeIterator,
+    R: ExactSizeIterator,
+{}
+
+impl<L, R> FusedIterator for Iter<L, R>
+where
+    L: FusedIterator,
+    R: FusedIterator,
+{}
