@@ -25,7 +25,26 @@ macro_rules! sink_fmt {
 
 pub use sink_fmt;
 
+#[repr(transparent)]
 pub struct FmtWriteSink<W: fmt::Write>(pub W);
+
+impl<W: fmt::Write> FmtWriteSink<W> {
+    #[inline]
+    #[must_use]
+    pub fn from_ref(w: &W) -> &Self {
+        // SAFETY:
+        // `FmtWriteSink` uses `repr(transparent)`, so it has the same memory layout as `W`.
+        unsafe { &*(w as *const W as *const Self) }
+    }
+    
+    #[inline]
+    #[must_use]
+    pub fn from_mut(w: &mut W) -> &mut Self {
+        // SAFETY:
+        // `FmtWriteSink` uses `repr(transparent)`, so it has the same memory layout as `W`.
+        unsafe { &mut *(w as *mut W as *mut Self) }
+    }
+}
 
 impl<W: fmt::Write> StrSink for FmtWriteSink<W> {
     type Error = fmt::Error;
@@ -148,6 +167,24 @@ mod io_sink {
     
     #[repr(transparent)]
     pub struct IoWriteSink<W: io::Write>(pub W);
+
+    impl<W: io::Write> IoWriteSink<W> {
+        #[inline]
+        #[must_use]
+        pub fn from_ref(w: &W) -> &Self {
+            // SAFETY:
+            // `IoWriteSink` uses `repr(transparent)`, so it has the same memory layout as `W`.
+            unsafe { &*(w as *const W as *const Self) }
+        }
+        
+        #[inline]
+        #[must_use]
+        pub fn from_mut(w: &mut W) -> &mut Self {
+            // SAFETY:
+            // `IoWriteSink` uses `repr(transparent)`, so it has the same memory layout as `W`.
+            unsafe { &mut *(w as *mut W as *mut Self) }
+        }
+    }
 
     impl<W: io::Write> StrSink for IoWriteSink<W> {
         type Error = io::Error;
