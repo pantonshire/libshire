@@ -12,34 +12,8 @@ pub trait StrSink {
     }
 }
 
-impl<W> StrSink for W
-where
-    W: fmt::Write,
-{
-    type Error = fmt::Error;
-
-    #[inline]
-    fn sink_str(&mut self, s: &str) -> Result<(), Self::Error> {
-        self.write_str(s)
-    }
-
-    #[inline]
-    fn sink_char(&mut self, c: char) -> Result<(), Self::Error> {
-        self.write_char(c)
-    }
-}
-
 pub trait FmtSink: StrSink {
     fn sink_fmt<'a>(&mut self, args: Arguments<'a>) -> Result<(), <Self as StrSink>::Error>;
-}
-
-impl<W> FmtSink for W
-where
-    W: fmt::Write,
-{
-    fn sink_fmt<'a>(&mut self, args: Arguments<'a>) -> Result<(), <Self as StrSink>::Error> {
-        self.write_fmt(args)
-    }
 }
 
 #[macro_export]
@@ -50,6 +24,29 @@ macro_rules! sink_fmt {
 }
 
 pub use sink_fmt;
+
+pub struct FmtWriteSink<W: fmt::Write>(pub W);
+
+impl<W: fmt::Write> StrSink for FmtWriteSink<W> {
+    type Error = fmt::Error;
+
+    #[inline]
+    fn sink_str(&mut self, s: &str) -> Result<(), Self::Error> {
+        self.0.write_str(s)
+    }
+
+    #[inline]
+    fn sink_char(&mut self, c: char) -> Result<(), Self::Error> {
+        self.0.write_char(c)
+    }
+}
+
+impl<W: fmt::Write> FmtSink for FmtWriteSink<W> {
+    #[inline]
+    fn sink_fmt<'a>(&mut self, args: Arguments<'a>) -> Result<(), <Self as StrSink>::Error> {
+        self.0.write_fmt(args)
+    }
+}
 
 #[cfg(feature = "alloc")]
 pub use string_sink::SinkString;
@@ -135,6 +132,36 @@ mod string_sink {
             // implementations of `Display` etc.
             let _ = <String as fmt::Write>::write_fmt(&mut self.0, args);
             Ok(())
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+pub use io_sink::IoWriteSink;
+
+#[cfg(feature = "std")]
+mod io_sink {
+    use core::fmt::Arguments;
+    use std::io;
+
+    use super::{StrSink, FmtSink};
+    
+    #[repr(transparent)]
+    pub struct IoWriteSink<W: io::Write>(pub W);
+
+    impl<W: io::Write> StrSink for IoWriteSink<W> {
+        type Error = io::Error;
+
+        #[inline]
+        fn sink_str(&mut self, s: &str) -> Result<(), Self::Error> {
+            self.0.write_all(s.as_bytes())
+        }
+    }
+
+    impl<W: io::Write> FmtSink for IoWriteSink<W> {
+        #[inline]
+        fn sink_fmt<'a>(&mut self, args: Arguments<'a>) -> Result<(), <Self as StrSink>::Error> {
+            self.0.write_fmt(args)
         }
     }
 }
