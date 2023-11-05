@@ -1,5 +1,25 @@
 use core::convert::Infallible;
 
+pub trait Apply: Sized {
+    fn apply<U, F>(self, f: F) -> U
+    where
+        F: FnOnce(Self) -> U;
+}
+
+impl<T> Apply for T
+where
+    T: Sized,
+{
+    #[inline]
+    #[must_use]
+    fn apply<U, F>(self, f: F) -> U
+    where
+        F: FnOnce(Self) -> U
+    {
+        f(self)
+    }
+}
+
 /// Consumes an element of type `Infallible` and produces an element of any type `T`. This is
 /// possible because `Infallible` has no elements and thus this function can never be called, so
 /// the statement "for any given type `T`, whenever this function returns, it returns an element of
